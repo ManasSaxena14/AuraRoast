@@ -1,0 +1,186 @@
+/* ═══════════════════════════════════════════════════════════════
+   Motion System I — page transitions (Blueprint §13.5)
+   Three families: continuity · hierarchy · ceremony.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Default: overlap, never a blank frame. */
+::view-transition-old(root) {
+  animation: vt-out var(--dur-md) var(--ease-settle) both;
+}
+::view-transition-new(root) {
+  animation: vt-in var(--dur-md) var(--ease-aura) both;
+  animation-delay: calc(var(--dur-md) * 0.4); /* the 40% overlap */
+}
+
+@keyframes vt-out {
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+@keyframes vt-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+/* Back navigation reverses the vertical direction. */
+:root[data-dir='back']::view-transition-old(root) {
+  animation-name: vt-out-back;
+}
+:root[data-dir='back']::view-transition-new(root) {
+  animation-name: vt-in-back;
+}
+@keyframes vt-out-back {
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes vt-in-back {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+}
+
+/* ── Continuity — the shared-element morph.
+   The browser does the interpolation; we only declare the pairing + curve. ── */
+:root[data-vt='vt-detail']::view-transition-group(*) {
+  animation-duration: var(--dur-lg);
+  animation-timing-function: var(--ease-aura);
+}
+
+/* Only the TAPPED card is ever named (§13.6 rule 4) — set by the click handler. */
+.drink-card[data-vt-active='true'] .drink-card__media,
+.guide-card[data-vt-active='true'] .guide-card__media,
+.drink-detail__hero,
+.guide-detail__hero {
+  view-transition-name: var(--vt-name);
+}
+
+/* The order Halo survives confirmation → tracking as one continuous object. */
+.order-halo {
+  view-transition-name: order-halo;
+}
+:root[data-vt='vt-continue']::view-transition-group(order-halo) {
+  animation-duration: 560ms;
+  animation-timing-function: var(--ease-aura);
+}
+
+/* ── Ceremony — the confirmation page owns its own longer beat. ── */
+:root[data-vt='vt-ceremony']::view-transition-new(root) {
+  animation: vt-ceremony var(--dur-xl) var(--ease-aura) both;
+}
+@keyframes vt-ceremony {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+/* ── Hierarchy — /account reads as a panel over the site. ── */
+:root[data-vt='vt-panel']::view-transition-new(root) {
+  animation: vt-panel 380ms var(--ease-aura) both;
+}
+@keyframes vt-panel {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+
+/* ── /login — scale 0.96 → 1 with fade. ── */
+:root[data-vt='vt-login']::view-transition-new(root) {
+  animation: vt-login 400ms var(--ease-aura) both;
+}
+@keyframes vt-login {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* ── Admin — deliberately plain. The motion budget is spent on guests. ── */
+:root[data-vt='vt-instant']::view-transition-old(root),
+:root[data-vt='vt-instant']::view-transition-new(root) {
+  animation-duration: var(--dur-micro);
+  animation-name: vt-fade;
+  animation-delay: 0ms;
+}
+@keyframes vt-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The outgoing snapshot never eats a tap (§13.6 rule 7). */
+::view-transition-old(root) {
+  pointer-events: none;
+}
+
+/* ── Fallback for browsers without the API — same feel, simpler mechanism. ── */
+@supports not (view-transition-name: none) {
+  .page-root {
+    animation: vt-in var(--dur-md) var(--ease-aura) both;
+  }
+  .page-root[data-vt='vt-ceremony'] {
+    animation: vt-ceremony var(--dur-xl) var(--ease-aura) both;
+  }
+  .page-root[data-vt='vt-panel'] {
+    animation: vt-panel 380ms var(--ease-aura) both;
+  }
+  .page-root[data-vt='vt-login'] {
+    animation: vt-login 400ms var(--ease-aura) both;
+  }
+  .page-root[data-vt='vt-instant'] {
+    animation: vt-fade var(--dur-micro) linear both;
+  }
+}
+
+/* ── The Halo wipe — cold entry to `/`, once per session (§13.4). ── */
+.halo-wipe {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: grid;
+  place-items: center;
+  background: var(--roast-950);
+  animation: halo-wipe-out 700ms var(--ease-aura) 620ms both;
+  pointer-events: none;
+}
+.halo-wipe__ring {
+  width: min(46vmin, 340px);
+  aspect-ratio: 1;
+}
+.halo-wipe__ring circle {
+  animation: halo-wipe-draw var(--dur-xl) var(--ease-aura) both;
+}
+@keyframes halo-wipe-draw {
+  from {
+    stroke-dashoffset: var(--halo-circumference);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes halo-wipe-out {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+/* ── Reduced motion collapses everything to a short honest fade. ── */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root),
+  .page-root {
+    animation: vt-fade 100ms linear both !important;
+    animation-delay: 0ms !important;
+  }
+  .halo-wipe {
+    display: none;
+  }
+}

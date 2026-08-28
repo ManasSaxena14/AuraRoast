@@ -1,0 +1,140 @@
+/* Leaflet overrides. `leaflet/dist/leaflet.css` is imported by MapCanvas —
+   the library owns its own positioning; this file only restyles it for the
+   dark canvas. Attribution stays visible on every instance: a licence
+   requirement, not a nicety. */
+.map-canvas {
+  width: 100%;
+  height: 100%;
+  background: var(--roast-900);
+  z-index: 0;
+}
+/* Leaflet applies `.leaflet-container` to the HOST element, so this must be a
+   compound selector — a descendant one never matches, and the library's own
+   #ddd background wins. */
+.map-canvas.leaflet-container {
+  width: 100%;
+  height: 100%;
+  background: var(--roast-900);
+  font-family: var(--font-body), sans-serif;
+  outline: none;
+}
+.map-canvas .leaflet-tile {
+  filter: saturate(0.8) contrast(1.05) brightness(0.95);
+}
+.map-canvas .leaflet-control-zoom {
+  border: none;
+  box-shadow: none;
+  margin: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.map-canvas .leaflet-control-zoom a {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  background: rgb(36 27 22 / 0.9);
+  color: var(--mist-100);
+  border: 1px solid rgb(242 206 147 / 0.14);
+  border-radius: var(--radius-sm);
+  font-size: 16px;
+  backdrop-filter: blur(6px);
+}
+.map-canvas .leaflet-control-zoom a:hover {
+  background: var(--roast-700);
+  color: var(--aura-300);
+}
+.map-canvas .leaflet-control-attribution {
+  padding: 3px 8px;
+  background: rgb(18 13 10 / 0.78);
+  color: var(--smoke-400);
+  font-size: 10px;
+  border-radius: var(--radius-sm) 0 0 0;
+}
+.map-canvas .leaflet-control-attribution a {
+  color: var(--smoke-400);
+  text-decoration: underline;
+}
+
+/* ── Markers: CSS transform/opacity only, never Leaflet's own animate ── */
+.map-pin {
+  position: relative;
+  display: grid;
+  place-items: center;
+  animation: pin-drop 420ms var(--ease-bloom) both;
+  animation-delay: var(--pin-delay, 0ms);
+}
+@keyframes pin-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.6);
+  }
+}
+.map-pin__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--aura-500);
+  box-shadow: 0 0 0 3px rgb(18 13 10 / 0.8);
+  transition: transform var(--dur-sm) var(--ease-bloom);
+}
+.map-pin__bloom {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(216 166 87 / 0.42), transparent 70%);
+  opacity: 0;
+  transition: opacity var(--dur-sm) var(--ease-aura);
+}
+.map-pin[data-active='true'] .map-pin__dot {
+  transform: scale(1.5);
+  background: var(--aura-300);
+}
+.map-pin[data-active='true'] .map-pin__bloom {
+  opacity: 1;
+}
+.map-pin:hover .map-pin__label,
+.map-pin[data-active='true'] .map-pin__label {
+  opacity: 1;
+}
+.leaflet-marker-icon:focus-visible .map-pin__label {
+  opacity: 1;
+}
+.map-pin--origin .map-pin__dot {
+  background: var(--verdant-500);
+}
+.map-pin--destination .map-pin__dot {
+  background: var(--mist-100);
+}
+.map-pin--courier .map-pin__bloom {
+  opacity: 1;
+  animation: halo-pulse 1.8s var(--ease-aura) infinite;
+}
+/* Labels only on the marker being hovered or selected. Four pins in one
+   neighbourhood with permanent labels is an unreadable pile. */
+.map-pin__label {
+  opacity: 0;
+  transition: opacity var(--dur-sm) var(--ease-aura);
+  position: absolute;
+  left: 16px;
+  white-space: nowrap;
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mist-100);
+  background: rgb(18 13 10 / 0.8);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-pin {
+    animation: none;
+  }
+  .map-pin--courier .map-pin__bloom {
+    animation: none;
+  }
+}

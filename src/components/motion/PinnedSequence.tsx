@@ -1,0 +1,164 @@
+'use client';
+/**
+ * A pinned section that steps through N beats as you scroll: the image
+ * cross-fades and scales, the caption swaps, and a segmented Halo-coloured
+ * progress bar fills.
+ *
+ * Pin length is `beats × 0.6vh` — long enough for each beat to land, short
+ * enough that the guest never feels held.
+ *
+ * Below 640px the GSAP pin is dropped — pinning a phone for six screens of
+ * scroll is a trap — but the section does NOT become a dead list. The media
+ * goes `position: sticky` and an IntersectionObserver advances the beat as
+ * each one passes, so the same idea survives with no pin, no duplicated
+ * images, and no scroll hijacking.
+ */
+import Image from 'next/image';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ScrollTrigger, gsap, useGSAP } from './gsap';
+
+export interface Beat {
+  id: string;
+  image: string;
+  step: string;
+  title: string;
+  body: string;
+}
+
+export function PinnedSequence({ beats, eyebrow, heading }: { beats: Beat[]; eyebrow: string; heading: string }) {
+  const ref = useRef<HTMLElement>(null);
+  const [active, setActive] = useState(0);
+  const [progress, setProgress] = useState(0);
+
+  const onUpdate = useCallback(
+    (p: number) => {
+      setProgress(p);
+      setActive(Math.min(beats.length - 1, Math.floor(p * beats.length)));
+    },
+    [beats.length],
+  );
+
+  // Mobile: sticky media + observer, no pin.
+  useEffect(() => {
+    const section = ref.current;
+    if (!section) return;
+    const mq = window.matchMedia('(max-width: 639px)');
+    if (!mq.matches) return;
+
+    const nodes = Array.from(section.querySelectorAll<HTMLElement>('.sequence__beat'));
+    if (!nodes.length) return;
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const i = nodes.indexOf(entry.target as HTMLElement);
+          if (i < 0) continue;
+          setActive(i);
+          setProgress((i + 1) / nodes.length);
+        }
+      },
+      // A band across the middle of the screen, so the beat that "counts" is
+      // the one the guest is actually looking at.
+      { rootMargin: '-45% 0px -45% 0px', threshold: 0 },
+    );
+    nodes.forEach((n) => io.observe(n));
+    return () => io.disconnect();
+  }, [beats.length]);
+
+  useGSAP(
+    () => {
+      const section = ref.current;
+      if (!section) return;
+      const mm = gsap.matchMedia();
+
+      mm.add('(min-width: 640px) and (prefers-reduced-motion: no-preference)', () => {
+        const st = ScrollTrigger.create({
+          trigger: section,
+          start: 'top top',
+          end: () => `+=${beats.length * window.innerHeight * 0.6}`,
+          pin: true,
+          // No `scrub` here on purpose. With scrub, `self.progress` is the
+          // ticker-interpolated value, which lags behind the real scroll
+          // position — and this is a discrete beat stepper, not a tween. The
+          // smoothing belongs in the CSS transitions on the frames instead.
+          anticipatePin: 1,
+          invalidateOnRefresh: true,
+          onUpdate: (self) => onUpdate(self.progress),
+        });
+        return () => st.kill();
+      });
+
+      return () => mm.revert();
+    },
+    { scope: ref, dependencies: [beats.length, onUpdate] },
+  );
+
+  return (
+    <section ref={ref} className="sequence" aria-label={heading}>
+      <div className="shell sequence__inner">
+        <header className="sequence__head">
+          <p className="eyebrow">{eyebrow}</p>
+          <h2>{heading}</h2>
+        </header>
+
+        <div className="sequence__stage">
+          <div className="sequence__media">
+            {beats.map((b, i) => (
+              <div
+                key={b.id}
+                className="sequence__frame"
+                data-active={i === active || undefined}
+                aria-hidden={i !== active}
+              >
+                <Image
+                  src={b.image}
+                  alt=""
+                  width={620}
+                  height={620}
+                  sizes="(max-width: 639px) 90vw, 42vw"
+                />
+              </div>
+            ))}
+            <div className="sequence__ring" aria-hidden="true">
+              <svg viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="47" fill="none" stroke="var(--aura-500)" strokeWidth="0.6" opacity="0.25" />
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="47"
+                  fill="none"
+                  stroke="var(--aura-500)"
+                  strokeWidth="0.9"
+                  strokeLinecap="round"
+                  strokeDasharray={295.3}
+                  strokeDashoffset={295.3 * (1 - progress)}
+                  transform="rotate(-90 50 50)"
+                />
+              </svg>
+            </div>
+          </div>
+
+          <div className="sequence__copy">
+            <ol className="sequence__list">
+              {beats.map((b, i) => (
+                <li key={b.id} className="sequence__beat" data-active={i === active || undefined}>
+                  <span className="sequence__step mono">{b.step}</span>
+                  <div>
+                    <h3>{b.title}</h3>
+                    <p className="muted">{b.body}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <div className="sequence__bar" aria-hidden="true">
+              {beats.map((b, i) => (
+                <span key={b.id} data-filled={i <= active || undefined} />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
