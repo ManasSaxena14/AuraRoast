@@ -106,10 +106,26 @@ export function GuideRunner({ guide }: { guide: Guide }) {
     { scope: rootRef },
   );
 
+  // The ticking value stays aria-live="off" — announcing it every second is
+  // unusable — so the transitions get announced instead, and only those: this
+  // string changes on a step boundary, on pause, and at the end of the brew.
+  const finished = !running && timerStep === guide.steps.length - 1 && elapsed >= stepSeconds;
+  const announcement = running
+    ? `Step ${timerStep + 1}: ${step?.title}`
+    : finished
+      ? 'Brew complete'
+      : elapsed
+        ? 'Timer paused'
+        : 'Timer ready';
+
   return (
     <>
       <div className="guide-progress" aria-hidden="true">
         <i />
+      </div>
+
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
       </div>
 
       <div className="timer" role="timer" aria-live="off">

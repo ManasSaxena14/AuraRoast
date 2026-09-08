@@ -2,6 +2,11 @@
 /**
  * Scroll-linked scale + rotation, for cards that should feel like they settle
  * into place rather than simply appear. Transform only, `ease: 'none'`.
+ *
+ * The starting opacity is 0.65, never 0. A scrubbed tween holds its from-state
+ * for as long as the element is below the trigger, so a zero here would mean
+ * "content is invisible until you scroll to it" — which is a content bug, not
+ * an animation (§14.7 rule 8).
  */
 import { useRef, type ReactNode } from 'react';
 import { gsap, useGSAP } from './gsap';
@@ -43,14 +48,29 @@ export function ScrollScale({
               end: 'top 45%',
               scrub: 0.5,
               invalidateOnRefresh: true,
+              // Promote for the ~half-second it is actually being scrubbed and
+              // drop the layer the moment it leaves the window (§16.3). The
+              // attribute is what carries `will-change` in motion.css.
+              onToggle: (self) => {
+                if (self.isActive) el.dataset.animating = 'true';
+                else delete el.dataset.animating;
+              },
             },
           },
         );
         return () => {
           tween.scrollTrigger?.kill();
           tween.kill();
-          gsap.set(el, { clearProps: 'all' });
+          delete el.dataset.animating;
+          gsap.set(el, { clearProps: 'transform,opacity,willChange' });
         };
+      });
+
+      // The scrub never runs here, so the element keeps its own CSS — but if
+      // the preference flips mid-session the from-state has to be handed back.
+      mm.add('(prefers-reduced-motion: reduce)', () => {
+        delete el.dataset.animating;
+        gsap.set(el, { clearProps: 'transform,opacity,willChange' });
       });
 
       return () => mm.revert();

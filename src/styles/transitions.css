@@ -1,52 +1,189 @@
 /* ═══════════════════════════════════════════════════════════════
    Motion System I — page transitions (Blueprint §13.5)
    Three families: continuity · hierarchy · ceremony.
+
+   ONE choreography, parameterised. There is a single pair of keyframes; every
+   route family below is a handful of custom properties on :root that those
+   keyframes read. The properties inherit into the view-transition pseudo tree
+   (the pseudos are children of the root element), so the same numbers drive
+   the API path AND the CSS fallback — which is what stops thirteen routes
+   from decaying into thirteen unrelated animations (§16.4).
    ═══════════════════════════════════════════════════════════════ */
 
-/* Default: overlap, never a blank frame. */
+:root {
+  /* How far the page travels. `data-dir` decides whether that becomes an x
+     or a y — hierarchy is vertical, breadth is horizontal. */
+  --vt-shift: 18px;
+
+  /* Forward IS the resting state, so `[data-dir='forward']` needs no rule. */
+  --vt-out-x: 0px;
+  --vt-out-y: calc(var(--vt-shift) * -0.6);
+  --vt-in-x: 0px;
+  --vt-in-y: var(--vt-shift);
+
+  /* Depth. The page you are leaving recedes; the page you are opening settles
+     down onto it rather than sliding in from nowhere. */
+  --vt-out-s: 0.994;
+  --vt-in-s: 1.012;
+
+  --vt-dur-out: var(--dur-md);
+  --vt-dur-in: var(--dur-lg);
+  --vt-delay-in: 110ms; /* the overlap — the seam is never an empty frame */
+
+  --vt-ease-out: var(--ease-settle);
+  --vt-ease-in: var(--ease-aura);
+
+  /* `plus-lighter` is the browser default and is correct for a crossfade of
+     two IDENTICAL frames. The moment the snapshots are offset from each other
+     it is wrong: the two copies of the same headline add, and the type ghosts
+     bright. Everything that moves uses `normal`; the pure fades opt back in. */
+  --vt-blend: normal;
+
+  /* How much Halo shows through the seam — see ::view-transition. */
+  --vt-bloom: 0.09;
+}
+
+/* The floor of the transition, under both snapshots.
+
+   Two jobs. `roast-950` means a route that suspends can never flash the white
+   canvas. And the amber radial is the Halo (§1.3): as the two snapshots cross
+   they dip below fully opaque for ~120ms, and this is what shows through — a
+   slow bloom in the middle of the frame, then gone. It is REVEALED by the
+   crossfade rather than animated, so it costs one raster for the whole
+   transition instead of a full-viewport repaint every frame. */
+::view-transition {
+  background-color: var(--roast-950);
+  background-image: radial-gradient(
+    58% 44% at 50% 47%,
+    rgb(216 166 87 / var(--vt-bloom)) 0%,
+    rgb(216 166 87 / 0) 70%
+  );
+}
+
 ::view-transition-old(root) {
-  animation: vt-out var(--dur-md) var(--ease-settle) both;
+  animation: vt-out var(--vt-dur-out) var(--vt-ease-out) both;
+  mix-blend-mode: var(--vt-blend);
+  transform-origin: 50% 50%;
+  /* The outgoing snapshot never eats a tap (§13.6 rule 7). */
+  pointer-events: none;
 }
 ::view-transition-new(root) {
-  animation: vt-in var(--dur-md) var(--ease-aura) both;
-  animation-delay: calc(var(--dur-md) * 0.4); /* the 40% overlap */
+  animation: vt-in var(--vt-dur-in) var(--vt-ease-in) var(--vt-delay-in) both;
+  mix-blend-mode: var(--vt-blend);
+  transform-origin: 50% 50%;
 }
 
 @keyframes vt-out {
   to {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translate3d(var(--vt-out-x, 0px), var(--vt-out-y, 0px), 0) scale(var(--vt-out-s, 1));
   }
 }
 @keyframes vt-in {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translate3d(var(--vt-in-x, 0px), var(--vt-in-y, 0px), 0) scale(var(--vt-in-s, 1));
   }
 }
 
-/* Back navigation reverses the vertical direction. */
-:root[data-dir='back']::view-transition-old(root) {
-  animation-name: vt-out-back;
-}
-:root[data-dir='back']::view-transition-new(root) {
-  animation-name: vt-in-back;
-}
-@keyframes vt-out-back {
-  to {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-}
-@keyframes vt-in-back {
+/* The reduced-motion floor. It ends at opacity 1 — nothing in this file may
+   finish invisible (§17.2). */
+@keyframes vt-fade-in {
   from {
     opacity: 0;
-    transform: translateY(-12px);
   }
+}
+
+/* ── Direction (computed by `directionFor`) ──────────────────────────────
+   Going deeper reads as descending. Coming back reverses it. Moving between
+   siblings in the primary nav is neither, so it travels sideways instead —
+   the axis alone tells a guest whether they went down or across. */
+:root[data-dir='back'] {
+  --vt-out-y: calc(var(--vt-shift) * 0.6);
+  --vt-in-y: calc(var(--vt-shift) * -1);
+}
+:root[data-dir='lateral'] {
+  --vt-out-x: calc(var(--vt-shift) * -0.6);
+  --vt-out-y: 0px;
+  --vt-in-x: var(--vt-shift);
+  --vt-in-y: 0px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   The route families. These come AFTER the direction block on purpose: a
+   variant that only sets `--vt-shift` still gets its axis from the direction
+   rules, and a variant that pins x/y (panel) overrides them outright.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Home — the anchor. No drift in any direction; you fall back into the
+   atmosphere rather than sliding to it, so the move is pure depth and the
+   Halo bloom is at its widest. ── */
+:root[data-vt='vt-home'] {
+  --vt-shift: 0px;
+  --vt-out-s: 0.985;
+  --vt-in-s: 1.035;
+  --vt-dur-out: var(--dur-lg);
+  --vt-dur-in: 620ms;
+  --vt-delay-in: 150ms;
+  --vt-bloom: 0.18;
+}
+
+/* ── Editorial — /about, /origins, /pairings. Long-form pages, so the beat is
+   a chapter turn: the longest travel in the system and a slow settle. ── */
+:root[data-vt='vt-editorial'] {
+  --vt-shift: 30px;
+  --vt-out-s: 0.992;
+  --vt-in-s: 1.008;
+  --vt-dur-in: 560ms;
+  --vt-delay-in: 140ms;
+  --vt-bloom: 0.13;
+}
+
+/* ── Index — /menu, /guides. A grid the guest is scanning, not reading. Short
+   travel, quick hand-off; anything slower gets in the way of browsing. ── */
+:root[data-vt='vt-index'] {
+  --vt-shift: 14px;
+  --vt-out-s: 0.996;
+  --vt-in-s: 1.006;
+  --vt-dur-out: var(--dur-sm);
+  --vt-dur-in: 380ms;
+  --vt-delay-in: 80ms;
+  --vt-bloom: 0.05;
+}
+
+/* ── Place — /locations, /stores. Arriving somewhere: the old room pushes
+   past you and the new one settles out of a slight overscale. ── */
+:root[data-vt='vt-place'] {
+  --vt-shift: 8px;
+  --vt-out-s: 1.012;
+  --vt-in-s: 1.03;
+  --vt-dur-in: 520ms;
+  --vt-bloom: 0.1;
+}
+
+/* ── Focus — /checkout, /reservations. A funnel, so the world narrows: the
+   page you left is pushed out of the way and the task arrives tight. ── */
+:root[data-vt='vt-focus'] {
+  --vt-shift: 0px;
+  --vt-out-s: 1.02;
+  --vt-in-s: 0.985;
+  --vt-dur-out: var(--dur-sm);
+  --vt-dur-in: 420ms;
+  --vt-delay-in: 90ms;
+  --vt-bloom: 0.04;
 }
 
 /* ── Continuity — the shared-element morph.
-   The browser does the interpolation; we only declare the pairing + curve. ── */
+   The browser does the interpolation; we only declare the pairing + curve.
+   The page barely moves here on purpose: the morphing card is the subject. ── */
+:root[data-vt='vt-detail'] {
+  --vt-shift: 10px;
+  --vt-out-s: 1;
+  --vt-in-s: 1.004;
+  --vt-dur-out: var(--dur-sm);
+  --vt-delay-in: 90ms;
+  --vt-bloom: 0.07;
+}
 :root[data-vt='vt-detail']::view-transition-group(*) {
   animation-duration: var(--dur-lg);
   animation-timing-function: var(--ease-aura);
@@ -60,82 +197,99 @@
   view-transition-name: var(--vt-name);
 }
 
-/* The order Halo survives confirmation → tracking as one continuous object. */
+/* The order Halo survives confirmation → tracking as one continuous object,
+   so nothing else is allowed to slide underneath it. */
 .order-halo {
   view-transition-name: order-halo;
+}
+:root[data-vt='vt-continue'] {
+  --vt-shift: 0px;
+  --vt-out-s: 0.99;
+  --vt-in-s: 1.01;
+  --vt-dur-in: 560ms;
+  --vt-delay-in: 140ms;
+  --vt-bloom: 0.2;
 }
 :root[data-vt='vt-continue']::view-transition-group(order-halo) {
   animation-duration: 560ms;
   animation-timing-function: var(--ease-aura);
 }
 
-/* ── Ceremony — the confirmation page owns its own longer beat. ── */
-:root[data-vt='vt-ceremony']::view-transition-new(root) {
-  animation: vt-ceremony var(--dur-xl) var(--ease-aura) both;
-}
-@keyframes vt-ceremony {
-  from {
-    opacity: 0;
-    transform: scale(0.98);
-  }
+/* ── Ceremony — the confirmation page owns the longest beat in the build, and
+   the brightest bloom. It happens once per order; it is allowed to. ── */
+:root[data-vt='vt-ceremony'] {
+  --vt-shift: 0px;
+  --vt-out-s: 0.99;
+  --vt-in-s: 0.98;
+  --vt-dur-out: var(--dur-lg);
+  --vt-dur-in: var(--dur-xl);
+  --vt-delay-in: 180ms;
+  --vt-bloom: 0.24;
 }
 
-/* ── Hierarchy — /account reads as a panel over the site. ── */
-:root[data-vt='vt-panel']::view-transition-new(root) {
-  animation: vt-panel 380ms var(--ease-aura) both;
-}
-@keyframes vt-panel {
-  from {
-    opacity: 0;
-    transform: translateY(24px);
-  }
+/* ── Hierarchy — /account reads as a panel over the site, so it rises whether
+   the guest arrived from above, below or sideways. ── */
+:root[data-vt='vt-panel'] {
+  --vt-out-x: 0px;
+  --vt-out-y: -8px;
+  --vt-in-x: 0px;
+  --vt-in-y: 26px;
+  --vt-out-s: 0.998;
+  --vt-in-s: 1;
+  --vt-dur-out: var(--dur-sm);
+  --vt-dur-in: 380ms;
+  --vt-delay-in: 60ms;
+  --vt-bloom: 0.07;
 }
 
 /* ── /login — scale 0.96 → 1 with fade. ── */
-:root[data-vt='vt-login']::view-transition-new(root) {
-  animation: vt-login 400ms var(--ease-aura) both;
-}
-@keyframes vt-login {
-  from {
-    opacity: 0;
-    transform: scale(0.96);
-  }
-}
-
-/* ── Admin — deliberately plain. The motion budget is spent on guests. ── */
-:root[data-vt='vt-instant']::view-transition-old(root),
-:root[data-vt='vt-instant']::view-transition-new(root) {
-  animation-duration: var(--dur-micro);
-  animation-name: vt-fade;
-  animation-delay: 0ms;
-}
-@keyframes vt-fade {
-  from {
-    opacity: 0;
-  }
+:root[data-vt='vt-login'] {
+  --vt-shift: 0px;
+  --vt-out-s: 1.01;
+  --vt-in-s: 0.96;
+  --vt-dur-out: var(--dur-sm);
+  --vt-dur-in: 400ms;
+  --vt-delay-in: 80ms;
+  --vt-bloom: 0.12;
 }
 
-/* The outgoing snapshot never eats a tap (§13.6 rule 7). */
-::view-transition-old(root) {
-  pointer-events: none;
+/* ── The two plain ones.
+   /admin because the motion budget is spent on guests; /credits because a
+   colophon that swept in would be showing off. Both are pure crossfades, so
+   they take `plus-lighter` and a linear curve back: opacity out plus opacity
+   in then sums to exactly 1 at every instant and the seam never dips. ── */
+:root[data-vt='vt-instant'],
+:root[data-vt='vt-quiet'] {
+  --vt-shift: 0px;
+  --vt-out-s: 1;
+  --vt-in-s: 1;
+  --vt-delay-in: 0ms;
+  --vt-ease-out: var(--ease-scrub);
+  --vt-ease-in: var(--ease-scrub);
+  --vt-blend: plus-lighter;
+  --vt-bloom: 0;
+}
+:root[data-vt='vt-instant'] {
+  --vt-dur-out: var(--dur-micro);
+  --vt-dur-in: var(--dur-micro);
+}
+:root[data-vt='vt-quiet'] {
+  --vt-dur-out: 240ms;
+  --vt-dur-in: 240ms;
 }
 
-/* ── Fallback for browsers without the API — same feel, simpler mechanism. ── */
+/* ── Layer 2 — no View Transitions API (§13.2).
+   React has already swapped the old page out by the time we can animate, so
+   only the arrival exists — but it reads as the same move, because it reads
+   the same custom properties off <html>, which the interceptor stamps before
+   it discovers the API is missing.
+
+   `data-entry` keeps this OFF the cold load: .page-root contains the LCP
+   headline, and fading the whole page up from zero on first paint would be
+   animating it (rule 6). It only ever runs on a client navigation. ── */
 @supports not (view-transition-name: none) {
-  .page-root {
-    animation: vt-in var(--dur-md) var(--ease-aura) both;
-  }
-  .page-root[data-vt='vt-ceremony'] {
-    animation: vt-ceremony var(--dur-xl) var(--ease-aura) both;
-  }
-  .page-root[data-vt='vt-panel'] {
-    animation: vt-panel 380ms var(--ease-aura) both;
-  }
-  .page-root[data-vt='vt-login'] {
-    animation: vt-login 400ms var(--ease-aura) both;
-  }
-  .page-root[data-vt='vt-instant'] {
-    animation: vt-fade var(--dur-micro) linear both;
+  .page-root[data-entry='client'] {
+    animation: vt-in var(--vt-dur-in) var(--vt-ease-in) both;
   }
 }
 
@@ -172,13 +326,36 @@
   }
 }
 
-/* ── Reduced motion collapses everything to a short honest fade. ── */
+/* ── Layer 3 — reduced motion collapses everything to a short honest fade.
+   Not by overriding thirteen variants, but by zeroing the parameters they all
+   share: no travel, no scale, no bloom, linear in and out so the crossfade
+   sums to 1 and neither brightens nor dips. `!important` because the variant
+   selectors above outrank a bare `:root`. Every animation still ENDS at
+   opacity 1 — reduced motion may never leave content invisible (§17.2). ── */
 @media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(root),
-  ::view-transition-new(root),
-  .page-root {
-    animation: vt-fade 100ms linear both !important;
-    animation-delay: 0ms !important;
+  :root {
+    --vt-shift: 0px !important;
+    --vt-out-x: 0px !important;
+    --vt-out-y: 0px !important;
+    --vt-in-x: 0px !important;
+    --vt-in-y: 0px !important;
+    --vt-out-s: 1 !important;
+    --vt-in-s: 1 !important;
+    --vt-dur-out: 100ms !important;
+    --vt-dur-in: 100ms !important;
+    --vt-delay-in: 0ms !important;
+    --vt-ease-out: var(--ease-scrub) !important;
+    --vt-ease-in: var(--ease-scrub) !important;
+    --vt-blend: plus-lighter !important;
+    --vt-bloom: 0 !important;
+  }
+  ::view-transition-group(*) {
+    animation-duration: 100ms !important;
+  }
+  @supports not (view-transition-name: none) {
+    .page-root[data-entry='client'] {
+      animation: vt-fade-in 100ms var(--ease-scrub) both !important;
+    }
   }
   .halo-wipe {
     display: none;

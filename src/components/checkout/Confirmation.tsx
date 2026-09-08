@@ -11,7 +11,7 @@
  * the tracking header, and becomes the live progress ring (§13.4).
  */
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { formatMoney } from '@/domain/money';
 import { Halo } from '@/components/motion/Halo';
 import { Reveal } from '@/components/motion/Reveal';
@@ -19,6 +19,8 @@ import { Button } from '@/components/ui/Button';
 import { Field } from '@/components/ui/Field';
 import { toast } from '@/components/toast/ToastProvider';
 import type { Order } from '@/domain/types';
+
+const REDIRECT_SECONDS = 5;
 
 export function Confirmation({
   order,
@@ -32,11 +34,38 @@ export function Confirmation({
   const [drawn, setDrawn] = useState(0);
   const [utr, setUtr] = useState(order.upiTransactionRef ?? '');
   const [saving, setSaving] = useState(false);
+  const [redirectCountdown, setRedirectCountdown] = useState(REDIRECT_SECONDS);
+  const [redirecting, setRedirecting] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDrawn(1), 60);
     return () => clearTimeout(t);
   }, []);
+
+  /* Auto-redirect countdown after receipt has been visible for ~5 seconds. */
+  useEffect(() => {
+    if (redirecting) return;
+    const id = setInterval(() => {
+      setRedirectCountdown((c) => {
+        if (c <= 1) {
+          clearInterval(id);
+          setRedirecting(true);
+          window.location.href = `/track/${order.orderNumber}`;
+          return 0;
+        }
+        return c - 1;
+      });
+    }, 1000);
+    timerRef.current = id;
+    return () => clearInterval(id);
+  }, [order.orderNumber, redirecting]);
+
+  const cancelRedirect = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    setRedirecting(true);
+    setRedirectCountdown(0);
+  };
 
   const cash = order.paymentMethod === 'cash';
 
@@ -106,8 +135,24 @@ export function Confirmation({
                 e.preventDefault();
                 setSaving(true);
                 try {
-                  await fetch(`/api/orders/${order.orderNumber}`, { method: 'GET' });
+                  // This used to GET the order, throw the response away and
+                  // claim the reference was noted. It now actually stores it.
+                  const res = await fetch(`/api/orders/${order.orderNumber}/utr`, {
+                    method: 'PATCH',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      ...(order.guestEmail ? { 'X-Aura-Contact': order.guestEmail } : {}),
+                    },
+                    body: JSON.stringify({ utr }),
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  if (!res.ok) {
+                    toast(data.error ?? 'Could not save that reference.', 'error');
+                    return;
+                  }
                   toast('Reference noted — we will match it against the transfer.', 'success');
+                } catch {
+                  toast('Could not save that reference.', 'error');
                 } finally {
                   setSaving(false);
                 }
@@ -169,14 +214,33 @@ export function Confirmation({
       </Reveal>
 
       <Reveal variant="fade" delay={1}>
-        <div className="row" style={{ justifyContent: 'center', gap: 'var(--space-3)' }}>
+        <div className="row" style={{ justifyContent: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
           <Link href={`/track/${order.orderNumber}`} className="btn btn--primary btn--lg" prefetch>
-            Watch it come
+            Track live
           </Link>
           <Link href="/menu" className="btn btn--outline btn--lg">
             Order something else
           </Link>
+          {!redirecting && (
+            <button type="button" className="btn btn--ghost btn--sm" onClick={cancelRedirect} style={{ color: 'var(--smoke-400)', minHeight: 36 }}>
+              Stay on this page
+            </button>
+          )}
         </div>
+        {/* Countdown bar — shows redirect progress to tracking */}
+        {!redirecting && (() => {
+          const pct = `${Math.max(0, (redirectCountdown / REDIRECT_SECONDS) * 100)}%`;
+          return (
+          <div style={{ maxWidth: 320, marginInline: 'auto', marginTop: 'var(--space-4)', textAlign: 'center' }}>
+            <div style={{ height: 2, background: 'rgb(242 206 147 / 0.12)', borderRadius: 1, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: pct, background: 'var(--aura-500)', borderRadius: 1, transition: 'width 1s linear' }} />
+            </div>
+            <p className="muted" style={{ fontSize: 10, marginTop: 6, letterSpacing: '0.08em' }}>
+              Redirecting to tracking in {redirectCountdown}s
+            </p>
+          </div>
+          );
+        })()}
       </Reveal>
     </div>
   );

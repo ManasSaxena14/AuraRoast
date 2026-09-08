@@ -25,12 +25,17 @@ export default function CreditsPage() {
         <h1>Photography credits.</h1>
         <Reveal variant="rise" delay={0.06}>
           <p className="lede">
-            Every photograph here came through the{' '}
+            Every photograph listed below came through the{' '}
             <a href="https://openverse.org" className="link-inline">
               Openverse
             </a>{' '}
             index, filtered to licences that permit commercial use <em>and</em> modification — each
             one is cropped and re-encoded for this site, so no-derivatives licences were excluded.
+            The pairing photography is licensed from{' '}
+            <a href="https://unsplash.com/license" className="link-inline">
+              Unsplash
+            </a>
+            , which asks for no attribution, so it is not itemised here.
           </p>
         </Reveal>
         <Reveal variant="fade" delay={0.1}>
@@ -40,7 +45,7 @@ export default function CreditsPage() {
                 {l}
               </span>
             ))}
-            <span className="chip chip--static">{PHOTO_CREDITS.length} photographs</span>
+            <span className="chip chip--static">{PHOTO_CREDITS.length} photographs listed</span>
           </div>
         </Reveal>
       </header>

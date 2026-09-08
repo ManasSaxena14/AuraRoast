@@ -89,7 +89,10 @@ export function MenuBrowser({ drinks }: { drinks: Drink[] }) {
 
       return () => mm.revert();
     },
-    { scope: gridRef, dependencies: [category] },
+    // `revertOnUpdate` or nothing: without it @gsap/react adds a SECOND context
+    // on every category change and never reverts the first, so each filter
+    // leaves a live matchMedia and a batch of triggers holding removed cards.
+    { scope: gridRef, dependencies: [category], revertOnUpdate: true },
   );
 
   // Filter change — out under --ease-settle, in under --ease-aura.
@@ -145,8 +148,21 @@ export function MenuBrowser({ drinks }: { drinks: Drink[] }) {
         />
       </div>
 
-      <p className="mono muted" style={{ fontSize: 'var(--text-xs)', margin: 'var(--space-4) 0' }}>
-        <CountUp value={visible.length} duration={0.6} grouped={false} /> of {drinks.length}
+      {/* Announced: with focus held in the search field, the count is the only
+          signal that the query landed. The counting figure is hidden from the
+          announcement and mirrored as text — a value that changes every frame
+          would re-fire the live region every frame. */}
+      <p
+        className="mono muted"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        style={{ fontSize: 'var(--text-xs)', margin: 'var(--space-4) 0' }}
+      >
+        <span aria-hidden="true">
+          <CountUp value={visible.length} duration={0.6} grouped={false} />
+        </span>
+        <span className="sr-only">{visible.length}</span> of {drinks.length}
         {category !== 'all' ? ` · ${CATEGORIES.find((c) => c.slug === category)?.blurb}` : ''}
       </p>
 

@@ -1,6 +1,8 @@
 import { trackOrder } from '@/services/order';
-import { fail, ok } from '@/lib/http';
+import { fail, ok, provesContact } from '@/lib/http';
 import { sliceRoute } from '@/lib/geo';
+import { NotFoundError } from '@/domain/errors';
+import { getOrderByNumber } from '@/repositories';
 
 export const runtime = 'nodejs';
 
@@ -8,10 +10,19 @@ export const runtime = 'nodejs';
  * The tracking payload, polled roughly every 2.5s. Pure derivation from stored
  * data (§7.4) — zero external calls, ever. OSRM was called once, at
  * confirmation, and the geometry persisted.
+ *
+ * Guarded like the other order routes: the destination coordinates below are
+ * the guest's home address, and order numbers are sequential.
  */
-export async function GET(_req: Request, { params }: { params: Promise<{ orderNumber: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ orderNumber: string }> }) {
   try {
     const { orderNumber } = await params;
+
+    const existing = await getOrderByNumber(orderNumber);
+    if (!existing || !provesContact(req, existing.guestEmail, existing.guestPhone)) {
+      throw new NotFoundError('Order');
+    }
+
     const { order, state, store } = await trackOrder(orderNumber);
     return ok(
       {

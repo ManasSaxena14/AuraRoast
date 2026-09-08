@@ -11,10 +11,11 @@
  * scroll is a trap — but the section does NOT become a dead list. The media
  * goes `position: sticky` and an IntersectionObserver advances the beat as
  * each one passes, so the same idea survives with no pin, no duplicated
- * images, and no scroll hijacking.
+ * images, and no scroll hijacking. Reduced motion takes the same observer at
+ * every width: the beats are the content, so they must still advance.
  */
 import Image from 'next/image';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ScrollTrigger, gsap, useGSAP } from './gsap';
 
 export interface Beat {
@@ -38,39 +39,36 @@ export function PinnedSequence({ beats, eyebrow, heading }: { beats: Beat[]; eye
     [beats.length],
   );
 
-  // Mobile: sticky media + observer, no pin.
-  useEffect(() => {
-    const section = ref.current;
-    if (!section) return;
-    const mq = window.matchMedia('(max-width: 639px)');
-    if (!mq.matches) return;
-
-    const nodes = Array.from(section.querySelectorAll<HTMLElement>('.sequence__beat'));
-    if (!nodes.length) return;
-
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          const i = nodes.indexOf(entry.target as HTMLElement);
-          if (i < 0) continue;
-          setActive(i);
-          setProgress((i + 1) / nodes.length);
-        }
-      },
-      // A band across the middle of the screen, so the beat that "counts" is
-      // the one the guest is actually looking at.
-      { rootMargin: '-45% 0px -45% 0px', threshold: 0 },
-    );
-    nodes.forEach((n) => io.observe(n));
-    return () => io.disconnect();
-  }, [beats.length]);
-
   useGSAP(
     () => {
       const section = ref.current;
       if (!section) return;
       const mm = gsap.matchMedia();
+
+      // The no-pin driver: sticky media + observer. It lives on the same
+      // matchMedia as the pin so the two can never both be off — sampling
+      // `window.matchMedia` once at mount left a dead zone where neither ran.
+      const observeBeats = () => {
+        const nodes = Array.from(section.querySelectorAll<HTMLElement>('.sequence__beat'));
+        if (!nodes.length) return;
+
+        const io = new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (!entry.isIntersecting) continue;
+              const i = nodes.indexOf(entry.target as HTMLElement);
+              if (i < 0) continue;
+              setActive(i);
+              setProgress((i + 1) / nodes.length);
+            }
+          },
+          // A band across the middle of the screen, so the beat that "counts"
+          // is the one the guest is actually looking at.
+          { rootMargin: '-45% 0px -45% 0px', threshold: 0 },
+        );
+        nodes.forEach((n) => io.observe(n));
+        return () => io.disconnect();
+      };
 
       mm.add('(min-width: 640px) and (prefers-reduced-motion: no-preference)', () => {
         const st = ScrollTrigger.create({
@@ -89,76 +87,88 @@ export function PinnedSequence({ beats, eyebrow, heading }: { beats: Beat[]; eye
         return () => st.kill();
       });
 
+      // Everything the pin does not cover — phones, and any width under
+      // reduced motion. Without this second branch a desktop guest with
+      // "reduce" set advances nothing: `active` stays 0, so five of six frames
+      // sit at `opacity: 0` and five of six beats at `opacity: 0.32` forever
+      // (§14.7 rule 8).
+      mm.add('(max-width: 639px), (prefers-reduced-motion: reduce)', observeBeats);
+
       return () => mm.revert();
     },
-    { scope: ref, dependencies: [beats.length, onUpdate] },
+    { scope: ref, dependencies: [beats.length, onUpdate], revertOnUpdate: true },
   );
 
   return (
-    <section ref={ref} className="sequence" aria-label={heading}>
-      <div className="shell sequence__inner">
-        <header className="sequence__head">
-          <p className="eyebrow">{eyebrow}</p>
-          <h2>{heading}</h2>
-        </header>
+    /* Wrapped for the same reason as HeroScrub: `pin` relocates this root into a
+       GSAP-injected `.pin-spacer`, so it must not sit directly in a parent whose
+       children React inserts into — see the note in HeroScrub.tsx. */
+    <div className="pin-host">
+      <section ref={ref} className="sequence" aria-label={heading}>
+        <div className="shell sequence__inner">
+          <header className="sequence__head">
+            <p className="eyebrow">{eyebrow}</p>
+            <h2>{heading}</h2>
+          </header>
 
-        <div className="sequence__stage">
-          <div className="sequence__media">
-            {beats.map((b, i) => (
-              <div
-                key={b.id}
-                className="sequence__frame"
-                data-active={i === active || undefined}
-                aria-hidden={i !== active}
-              >
-                <Image
-                  src={b.image}
-                  alt=""
-                  width={620}
-                  height={620}
-                  sizes="(max-width: 639px) 90vw, 42vw"
-                />
+          <div className="sequence__stage">
+            <div className="sequence__media">
+              {beats.map((b, i) => (
+                <div
+                  key={b.id}
+                  className="sequence__frame"
+                  data-active={i === active || undefined}
+                  aria-hidden={i !== active}
+                >
+                  <Image
+                    src={b.image}
+                    alt=""
+                    width={620}
+                    height={620}
+                    sizes="(max-width: 639px) 90vw, 42vw"
+                  />
+                </div>
+              ))}
+              <div className="sequence__ring" aria-hidden="true">
+                <svg viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r="47" fill="none" stroke="var(--aura-500)" strokeWidth="0.6" opacity="0.25" />
+                  <circle
+                    cx="50"
+                    cy="50"
+                    r="47"
+                    fill="none"
+                    stroke="var(--aura-500)"
+                    strokeWidth="0.9"
+                    strokeLinecap="round"
+                    strokeDasharray={295.3}
+                    strokeDashoffset={295.3 * (1 - progress)}
+                    transform="rotate(-90 50 50)"
+                  />
+                </svg>
               </div>
-            ))}
-            <div className="sequence__ring" aria-hidden="true">
-              <svg viewBox="0 0 100 100">
-                <circle cx="50" cy="50" r="47" fill="none" stroke="var(--aura-500)" strokeWidth="0.6" opacity="0.25" />
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="47"
-                  fill="none"
-                  stroke="var(--aura-500)"
-                  strokeWidth="0.9"
-                  strokeLinecap="round"
-                  strokeDasharray={295.3}
-                  strokeDashoffset={295.3 * (1 - progress)}
-                  transform="rotate(-90 50 50)"
-                />
-              </svg>
             </div>
-          </div>
 
-          <div className="sequence__copy">
-            <ol className="sequence__list">
-              {beats.map((b, i) => (
-                <li key={b.id} className="sequence__beat" data-active={i === active || undefined}>
-                  <span className="sequence__step mono">{b.step}</span>
-                  <div>
-                    <h3>{b.title}</h3>
-                    <p className="muted">{b.body}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-            <div className="sequence__bar" aria-hidden="true">
-              {beats.map((b, i) => (
-                <span key={b.id} data-filled={i <= active || undefined} />
-              ))}
+            <div className="sequence__copy">
+              <ol className="sequence__list">
+                {beats.map((b, i) => (
+                  <li key={b.id} className="sequence__beat" data-active={i === active || undefined}>
+                    <span className="sequence__step mono">{b.step}</span>
+                    <div>
+                      <h3>{b.title}</h3>
+                      <p className="muted">{b.body}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              <div className="sequence__bar" aria-hidden="true">
+                {beats.map((b, i) => (
+                  <span key={b.id} data-filled={i <= active || undefined} />
+                ))}
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </div>
   );
 }

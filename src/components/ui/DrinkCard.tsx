@@ -17,9 +17,13 @@ import type { Drink } from '@/domain/types';
 export function DrinkCard({
   drink,
   priority = false,
+  headingLevel: Heading = 'h3',
 }: {
   drink: Drink;
   priority?: boolean;
+  // The rail on `/` sits under a section h2, the `/menu` grid directly under
+  // the page h1 — the grid's owner picks the level so the outline never skips.
+  headingLevel?: 'h2' | 'h3';
 }) {
   return (
     <Link
@@ -48,7 +52,7 @@ export function DrinkCard({
       </div>
       <div className="drink-card__body">
         <div className="row-between" style={{ alignItems: 'flex-start' }}>
-          <h3 className="drink-card__title">{drink.name}</h3>
+          <Heading className="drink-card__title">{drink.name}</Heading>
           <span className="drink-card__price">{formatMoneyShort(drink.basePrice)}</span>
         </div>
         <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>

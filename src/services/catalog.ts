@@ -10,7 +10,7 @@ import {
   searchDrinks,
 } from '@/repositories';
 import { CATEGORIES } from '@/data/drinks';
-import { priceCart, findPromo } from '@/domain/pricing';
+import { priceCart, findPromo, buildModifierIndex } from '@/domain/pricing';
 import { buildPreview, defaultSelection } from '@/domain/brew-plan';
 import type { CartLine, Drink, SelectedModifier } from '@/domain/types';
 
@@ -68,7 +68,12 @@ export async function quote(drinkId: string, selected: SelectedModifier[], quant
     quantity: Math.max(1, quantity),
     modifiers: selected,
   };
-  const priced = priceCart({ lines: [line], catalogue, fulfillment: 'pickup' });
+  const priced = priceCart({
+    lines: [line],
+    catalogue,
+    modifiers: buildModifierIndex(await listModifiers()),
+    fulfillment: 'pickup',
+  });
   return {
     unitPrice: priced.lines[0]?.unitPrice ?? drink.basePrice,
     lineTotal: priced.lines[0]?.lineTotal ?? drink.basePrice,
@@ -83,10 +88,11 @@ export async function previewCart(input: {
   tip?: number;
   promoCode?: string | null;
 }) {
-  const catalogue = await catalogueMap();
+  const [catalogue, modifiers] = await Promise.all([catalogueMap(), listModifiers()]);
   return priceCart({
     lines: input.lines,
     catalogue,
+    modifiers: buildModifierIndex(modifiers),
     fulfillment: input.fulfillment,
     tip: input.tip,
     promo: findPromo(input.promoCode),

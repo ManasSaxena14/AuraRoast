@@ -143,12 +143,20 @@ export function scrollTo(target: string | number | HTMLElement, offset = 0) {
   }
 }
 
+// The cart drawer and the Barista can be open at once (the Barista sits above
+// the header, so the cart button stays clickable). Without a depth count,
+// closing one releases the lock the other still holds and the page scrolls
+// behind the open overlay.
+let locks = 0;
+
 export function lockScroll() {
+  if (locks++ > 0) return;
   window.dispatchEvent(new Event('ui:lock-scroll'));
   document.documentElement.style.overflow = 'hidden';
 }
 
 export function unlockScroll() {
+  if (locks === 0 || --locks > 0) return;
   window.dispatchEvent(new Event('ui:unlock-scroll'));
   document.documentElement.style.overflow = '';
 }

@@ -1,0 +1,301 @@
+/* ── /locations ──────────────────────────────────────────────────────────────
+   Page-scoped styles. Kept in its own file so the page can grow without
+   turning pages.css into a dumping ground. Everything here uses the tokens
+   in tokens.css — no raw colours, no raw easing curves (motion lint enforces
+   the second one).
+
+   The page is an editorial directory, not a locator: rules instead of cards,
+   a sticky city column instead of a grid of tiles, and hours printed in full
+   rather than reduced to an open/closed dot. The dot lives on /stores. */
+
+/* ── Masthead figures ────────────────────────────────────────────────────── */
+.loc-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-5);
+  max-width: 760px;
+  margin-top: var(--space-3);
+  padding-top: var(--space-5);
+  border-top: var(--hairline);
+}
+.loc-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+/* Label under figure, but the label is still first in the DOM so a screen
+   reader hears "Rooms, twelve" rather than "twelve, Rooms". */
+.loc-stats dt {
+  order: 2;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--smoke-400);
+}
+.loc-stats dd {
+  order: 1;
+  margin: 0;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: var(--text-xl);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.loc-head__note {
+  font-size: var(--text-sm);
+  max-width: var(--measure);
+}
+
+/* ── Contents ────────────────────────────────────────────────────────────── */
+.loc-index {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  border-top: var(--hairline);
+}
+.loc-index__link {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-2);
+  border-bottom: var(--hairline);
+  color: var(--mist-100);
+  transition: color var(--dur-sm) var(--ease-aura);
+}
+.loc-index__link:hover {
+  color: var(--aura-300);
+}
+.loc-index__num {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--aura-500);
+}
+.loc-index__city {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: var(--text-lg);
+  letter-spacing: -0.02em;
+}
+.loc-index__count {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--smoke-400);
+}
+
+/* ── A city chapter ──────────────────────────────────────────────────────── */
+.loc-city {
+  /* The header is fixed; an anchor jump has to clear it. */
+  scroll-margin-top: calc(var(--header-h) + var(--space-6));
+}
+.loc-city__grid {
+  display: grid;
+  gap: var(--space-7);
+}
+.loc-city__aside {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.loc-city__num {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--aura-500);
+}
+.loc-city__name {
+  font-size: var(--text-2xl);
+}
+.loc-city__media {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--radius-md);
+  border: var(--hairline);
+  background: var(--roast-900);
+}
+/* The parallax layer is overscanned, so a ±8% drift can never expose an edge
+   inside the wipe frame. Height is stated explicitly because `.image-reveal >
+   *` sets `height: 100%`, which would otherwise win over the `inset` pair. */
+.loc-city__media .parallax {
+  position: absolute;
+  inset: -12% 0;
+  height: 124%;
+}
+.loc-city__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: var(--hairline);
+}
+.loc-city__facts > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.loc-city__facts dt {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--smoke-400);
+}
+.loc-city__facts dd {
+  margin: 0;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--aura-300);
+}
+
+@media (min-width: 900px) {
+  .loc-city__grid {
+    grid-template-columns: 0.82fr 1.18fr;
+    gap: var(--space-9);
+    align-items: start;
+  }
+  .loc-city__aside {
+    position: sticky;
+    top: calc(var(--header-h) + var(--space-6));
+  }
+}
+
+/* ── The rooms ───────────────────────────────────────────────────────────── */
+.loc-city__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  align-items: flex-start;
+}
+.loc-rooms {
+  width: 100%;
+}
+.loc-room {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block: var(--space-6);
+  border-top: var(--hairline);
+}
+.loc-room:last-child {
+  border-bottom: var(--hairline);
+}
+/* The rule above a room warms when you are reading it. One property, one
+   colour, no lift — a directory that jumps under the cursor is a nuisance. */
+.loc-room::before {
+  content: '';
+  position: absolute;
+  inset: -1px 0 auto 0;
+  height: 1px;
+  background: var(--aura-500);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--dur-md) var(--ease-aura);
+}
+.loc-room:hover::before,
+.loc-room:focus-within::before {
+  transform: scaleX(1);
+}
+.loc-room__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-5);
+}
+.loc-room h3 {
+  font-size: var(--text-xl);
+}
+.loc-room__addr {
+  font-size: var(--text-xs);
+  color: var(--smoke-400);
+  text-align: right;
+  flex: 1 1 22ch;
+}
+.loc-room__blurb {
+  max-width: 56ch;
+  color: var(--mist-100);
+}
+.loc-hours {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-1) var(--space-6);
+  margin-top: var(--space-1);
+  padding-left: var(--space-4);
+  border-left: 1px solid rgb(242 206 147 / 0.16);
+}
+.loc-hours > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.loc-hours dt {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--smoke-400);
+}
+.loc-hours dd {
+  margin: 0;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.loc-room__tel {
+  align-self: flex-start;
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  color: var(--aura-500);
+  padding-block: var(--space-1);
+  transition: color var(--dur-sm) var(--ease-aura);
+}
+.loc-room__tel:hover {
+  color: var(--aura-300);
+}
+
+/* ── The constants ───────────────────────────────────────────────────────── */
+.loc-constants {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: var(--space-6);
+}
+.loc-constant {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid rgb(216 166 87 / 0.38);
+}
+.loc-constant h3 {
+  font-size: var(--text-lg);
+}
+.loc-constant p {
+  font-size: var(--text-sm);
+  max-width: 42ch;
+}
+
+/* ── Outro ───────────────────────────────────────────────────────────────── */
+.loc-outro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-5);
+  text-align: center;
+  padding-block: var(--space-9) var(--space-10);
+}
+.loc-outro__lede {
+  margin-inline: auto;
+}
+.loc-outro__ctas {
+  justify-content: center;
+  margin-top: var(--space-6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The rule is a state, not a flourish — it stays, it just stops sweeping. */
+  .loc-room::before {
+    transition: none;
+  }
+}

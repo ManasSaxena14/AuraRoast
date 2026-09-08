@@ -21,6 +21,7 @@ import { PlacingOverlay, type PlacingStage } from './PlacingOverlay';
 import { useCart } from '@/components/cart/CartProvider';
 import { storesByCity } from '@/data/stores';
 import { toast } from '@/components/toast/ToastProvider';
+import { haversine } from '@/lib/geo';
 import type { PricedCart, Store } from '@/domain/types';
 
 interface PaymentSettings {
@@ -30,13 +31,43 @@ interface PaymentSettings {
   note: string;
 }
 
-/** One key per checkout attempt, kept across retries of the SAME cart (§9.3). */
-function idempotencyKey(): string {
-  const existing = sessionStorage.getItem('aura.idem');
-  if (existing) return existing;
+/**
+ * One key per checkout attempt, kept across retries of the SAME order (§9.3).
+ *
+ * "Same" is now decided by the payload, not by the tab. The server hashes the
+ * store, name, phone, address, coordinates, tip and promo as well as the lines,
+ * so a guest who fixes a typo in their address and presses Place again would
+ * otherwise send the cached key with a different body and get a permanent 422
+ * idempotency_conflict. Re-minting when the signature changes keeps the replay
+ * protection for a genuine retry and drops it for a genuinely different order.
+ */
+function idempotencyKey(signature: string): string {
+  try {
+    const cached = sessionStorage.getItem('aura.idem');
+    if (cached) {
+      const parsed = JSON.parse(cached) as { key?: string; sig?: string };
+      if (parsed.key && parsed.sig === signature) return parsed.key;
+    }
+  } catch {
+    /* a corrupt entry just means we mint a fresh key */
+  }
   const key = crypto.randomUUID();
-  sessionStorage.setItem('aura.idem', key);
+  try {
+    sessionStorage.setItem('aura.idem', JSON.stringify({ key, sig: signature }));
+  } catch {
+    /* private mode — the key still protects this attempt */
+  }
   return key;
+}
+
+function findNearestStore(stores: Store[], lat: number, lng: number): Store | null {
+  let best: Store | null = null;
+  let bestDist = Infinity;
+  for (const s of stores) {
+    const d = haversine({ lat, lng }, { lat: s.lat, lng: s.lng });
+    if (d < bestDist) { bestDist = d; best = s; }
+  }
+  return best;
 }
 
 export function Checkout({ stores, payment }: { stores: Store[]; payment: PaymentSettings }) {
@@ -45,7 +76,9 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
     useCart();
 
   const [method, setMethod] = useState<'cash' | 'upi'>('cash');
-  const [storeId, setStoreId] = useState(stores[0]?.id ?? '');
+  const [storeId, setStoreId] = useState<string>(stores[0]?.id ?? '');
+  const [nearestLabel, setNearestLabel] = useState<string | null>(null);
+  const [detecting, setDetecting] = useState(true);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -76,9 +109,60 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
     };
   }, [lines, fulfillment, tip, promoCode, hydrated]);
 
+  /* Nearest-outlet detection: geolocate → haversine → pick closest store.
+     Fallback: localStorage last-used → first store in list. */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setDetecting(true);
+      // 1. Check localStorage for a previously saved store preference
+      try {
+        const saved = localStorage.getItem('aura.store');
+        if (saved && stores.some((s) => s.id === saved)) {
+          if (!cancelled) {
+            setStoreId(saved);
+            setNearestLabel(null);
+            setDetecting(false);
+            return;
+          }
+        }
+      } catch { /* localStorage unavailable */ }
+
+      // 2. Try browser geolocation
+      try {
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+          if (!navigator.geolocation) reject(new Error('No geolocation'));
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: false,
+            timeout: 5000,
+            maximumAge: 300000,
+          });
+        });
+        if (cancelled) return;
+        const nearest = findNearestStore(stores, pos.coords.latitude, pos.coords.longitude);
+        if (nearest) {
+          setStoreId(nearest.id);
+          setNearestLabel(`Nearest: ${nearest.name}`);
+          localStorage.setItem('aura.store', nearest.id);
+        }
+      } catch {
+        // 3. Fall back to first store (same as original behaviour)
+        setNearestLabel(null);
+      } finally {
+        if (!cancelled) setDetecting(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [stores]);
+
   const totals = server ?? priced;
   const store = useMemo(() => stores.find((s) => s.id === storeId), [stores, storeId]);
   const cityGroups = useMemo(() => storesByCity(stores), [stores]);
+
+  const handleStoreChange = useCallback((id: string) => {
+    setStoreId(id);
+    try { localStorage.setItem('aura.store', id); } catch { /* unavailable */ }
+  }, []);
 
   const place = useCallback(
     async (e: React.FormEvent) => {
@@ -97,7 +181,6 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
         await beat(420);
 
         setStage('claiming');
-        const key = idempotencyKey();
         await beat(360);
 
         setStage('routing');
@@ -125,24 +208,30 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
         }
 
         setStage('writing');
+        // Built once: the same object decides the idempotency key and is the
+        // body, so the key can never drift from what it is protecting. The
+        // geocoded coordinates are part of it, which is why the key is minted
+        // here and not back at the `claiming` beat.
+        const payload = {
+          lines,
+          fulfillment,
+          paymentMethod: method,
+          storeId,
+          guestName: name,
+          guestEmail: email,
+          guestPhone: phone,
+          addressLine: fulfillment === 'delivery' ? address : null,
+          deliveryLat,
+          deliveryLng,
+          tip,
+          promoCode,
+        };
+        const key = idempotencyKey(JSON.stringify(payload));
+
         const res = await fetch('/api/orders', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
-          body: JSON.stringify({
-            lines,
-            fulfillment,
-            paymentMethod: method,
-            storeId,
-            guestName: name,
-            guestEmail: email,
-            guestPhone: phone,
-            addressLine: fulfillment === 'delivery' ? address : null,
-            deliveryLat,
-            deliveryLng,
-            tip,
-            promoCode,
-            clientClaimedTotal: totals.total,
-          }),
+          body: JSON.stringify({ ...payload, clientClaimedTotal: totals.total }),
         });
         const data = await res.json();
 
@@ -217,14 +306,14 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
             <SelectField
               label="Bar"
               value={storeId}
-              onChange={(e) => setStoreId(e.target.value)}
+              onChange={(e) => handleStoreChange(e.target.value)}
               hint={store?.blurb}
             >
               {cityGroups.map((g) => (
                 <optgroup key={g.slug} label={g.name}>
                   {g.stores.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.name}
+                      {s.name}{s.id === storeId && nearestLabel ? ' ★' : ''}
                     </option>
                   ))}
                 </optgroup>
@@ -243,6 +332,19 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
                 hint="The tracking link goes here"
               />
             </div>
+            {nearestLabel && (
+              <div className="stack-sm" style={{ marginTop: 'var(--space-2)' }}>
+                <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                  <span style={{ color: 'var(--aura-500)' }}>●</span> {nearestLabel}
+                  <button type="button" className="muted" style={{ marginLeft: 8, textDecoration: 'underline', fontSize: 11, background: 'none', border: 0, cursor: 'pointer', padding: 0, color: 'inherit' }} onClick={() => { setNearestLabel(null); localStorage.removeItem('aura.store'); }}>change</button>
+                </p>
+              </div>
+            )}
+            {detecting && !nearestLabel && (
+              <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 'var(--space-2)' }}>
+                Finding the nearest outlet…
+              </p>
+            )}
             <Field label="Phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel" />
 
             {fulfillment === 'delivery' ? (

@@ -30,6 +30,11 @@ const schema = z.object({
   UPI_PAYEE_NAME: z.string().default('Aura Toast Coffee'),
 
   CRON_SECRET: z.string().optional(),
+  /* Gates the one route that can confirm a UPI order. Unset DENIES (§5.4). */
+  ADMIN_SECRET: z.string().optional(),
+  /* Opt in ONLY behind a proxy that OVERWRITES x-forwarded-for. Left unset,
+     every caller shares one rate-limit bucket — see clientKey in lib/http.ts. */
+  TRUST_PROXY_HEADERS: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);

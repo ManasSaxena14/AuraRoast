@@ -104,8 +104,15 @@ export function ReviewList({ drinkId, initial }: { drinkId: string; initial: Rev
               <Rating value={r.rating} />
             </div>
             <p className="muted">{r.body}</p>
+            {/* Pinned to IST: drink pages are prerendered, so an unpinned zone
+                formats the day differently on the server and on hydration. */}
             <p className="mono muted" style={{ fontSize: 10, marginTop: 'var(--space-3)' }}>
-              {new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+              {new Date(r.createdAt).toLocaleDateString('en-IN', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+                timeZone: 'Asia/Kolkata',
+              })}
             </p>
           </article>
         ))}

@@ -9,7 +9,7 @@
  */
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NAV } from '@/config/site';
 import { ScrollProgress } from '@/components/motion/ScrollProgress';
 import { useCart } from '@/components/cart/CartProvider';
@@ -18,8 +18,20 @@ import { Logo } from './Logo';
 export function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [announceDismissed, setAnnounceDismissed] = useState(false);
   const pathname = usePathname();
   const { count, open } = useCart();
+
+  useEffect(() => {
+    try {
+      setAnnounceDismissed(localStorage.getItem('aura.announce') === '1');
+    } catch { /* unavailable */ }
+  }, []);
+
+  const dismissAnnounce = () => {
+    setAnnounceDismissed(true);
+    try { localStorage.setItem('aura.announce', '1'); } catch { /* unavailable */ }
+  };
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 80);
@@ -32,6 +44,22 @@ export function Header() {
 
   return (
     <header className="header" data-scrolled={scrolled || undefined}>
+      {/* Announcement bar — dismissible, never required. No role="banner":
+          the <header> above is already the document banner and ARIA forbids
+          nesting one inside another. */}
+      {!announceDismissed && (
+        <div className="announce-bar">
+          <div className="announce-bar__inner">
+            <span className="announce-bar__dot" aria-hidden="true" />
+            <span className="announce-bar__text">
+              Free delivery on orders over ₹500&nbsp;&nbsp;·&nbsp;&nbsp;Burnt Honey Mocha is back, October–February&nbsp;&nbsp;·&nbsp;&nbsp;12 rooms across 6 cities
+            </span>
+            <button className="announce-bar__close" onClick={dismissAnnounce} aria-label="Dismiss announcement">
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+            </button>
+          </div>
+        </div>
+      )}
       <div className="header__inner">
         <Link href="/" className="header__brand" aria-label="AURA TOAST — home">
           <Logo size={30} tagline />

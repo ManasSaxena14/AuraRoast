@@ -20,21 +20,33 @@ import { useCallback, useEffect, useLayoutEffect, useRef, startTransition } from
 import { directionFor, variantFor } from './routes';
 
 type DocWithVT = Document & {
-  startViewTransition?: (cb: () => void | Promise<void>) => { finished: Promise<void> };
+  startViewTransition?: (cb: () => void | Promise<void>) => {
+    finished: Promise<void>;
+    ready?: Promise<void>;
+    updateCallbackDone?: Promise<void>;
+  };
 };
 
 export function ViewTransitions({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const resolver = useRef<(() => void) | null>(null);
+  const pending = useRef<string | null>(null);
 
   // Resolve the transition the instant React has committed the new route.
+  //
+  // Deliberately dependency-free rather than keyed on `pathname`: a navigation
+  // that changes only the QUERY (/origins?focus=a → /origins?focus=b) never
+  // changes pathname, so a pathname-keyed effect never fires and the morph sits
+  // frozen until the 700ms bail-out below. Comparing the committed URL against
+  // the one we asked for resolves on the right commit in both cases.
   useLayoutEffect(() => {
-    if (resolver.current) {
-      resolver.current();
-      resolver.current = null;
-    }
-  }, [pathname]);
+    if (!resolver.current) return;
+    if (pending.current && window.location.pathname + window.location.search !== pending.current) return;
+    resolver.current();
+    resolver.current = null;
+    pending.current = null;
+  });
 
   const navigate = useCallback(
     (href: string) => {
@@ -49,6 +61,8 @@ export function ViewTransitions({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      pending.current = href.split('#')[0];
+
       const transition = doc.startViewTransition(
         () =>
           new Promise<void>((resolve) => {
@@ -59,6 +73,7 @@ export function ViewTransitions({ children }: { children: React.ReactNode }) {
               if (resolver.current) {
                 resolver.current();
                 resolver.current = null;
+                pending.current = null;
               }
             }, 700);
           }),
@@ -75,6 +90,14 @@ export function ViewTransitions({ children }: { children: React.ReactNode }) {
       // outcome, not an error, but an uncaught rejection would still surface
       // in the console as one.
       transition.finished.then(clear, clear);
+
+      // `ready` and `updateCallbackDone` are separate promises the browser
+      // creates and rejects on that same skip ("InvalidStateError: Transition
+      // was aborted because of invalid state"). Nothing awaits them, so without
+      // these no-op catches every interrupted navigation logs an uncaught
+      // rejection — 127 of them in a 44-hop navigation stress run.
+      transition.ready?.catch(() => {});
+      transition.updateCallbackDone?.catch(() => {});
     },
     [router],
   );

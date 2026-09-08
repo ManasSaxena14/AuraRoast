@@ -3,6 +3,7 @@
  * The ATOMIC booking itself lives in the repository — this file only owns the
  * pure rules about which slots exist and when they can still be booked.
  */
+import { DomainError } from './errors';
 import type { ReservationSlot, ReservationType } from './types';
 
 export const SLOT_MINUTES = 30;
@@ -62,6 +63,9 @@ export function seatsConsumed(type: ReservationType, partySize: number): number 
 
 export function validatePartySize(n: number): void {
   if (!Number.isInteger(n) || n < 1 || n > MAX_PARTY_SIZE) {
-    throw new Error(`Party size must be 1–${MAX_PARTY_SIZE}.`);
+    // A `DomainError`, not a bare one: this is the FIRST statement of `book()`,
+    // so a plain Error here surfaces as a 500 and the guest never reads the
+    // message that was written for them.
+    throw new DomainError(`Party size must be 1–${MAX_PARTY_SIZE}.`, 'invalid_party_size', 400);
   }
 }

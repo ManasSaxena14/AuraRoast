@@ -50,7 +50,25 @@ interface TrackPayload {
   destination: { lat: number; lng: number } | null;
 }
 
-export function Tracker({ order: initial }: { order: Order }) {
+export function Tracker({
+  order: initial,
+  initialState,
+  contact,
+}: {
+  order: Order;
+  /**
+   * The guest's own contact detail, echoed back as `X-Aura-Contact`. The track
+   * and cancel routes are guarded by it — order numbers are sequential, so
+   * without a proof anyone could poll or cancel a stranger's order.
+   */
+  contact?: string | null;
+  /**
+   * The derived state, computed on the server for the first paint. Nothing ever
+   * advances the stored `status` column, so falling back to it paints "Order
+   * received / 0 %" for an order that was delivered an hour ago (§7.4).
+   */
+  initialState?: TrackPayload['state'];
+}) {
   const [order, setOrder] = useState(initial);
   const [data, setData] = useState<TrackPayload | null>(null);
   const [cancelling, setCancelling] = useState(false);
@@ -73,7 +91,10 @@ export function Tracker({ order: initial }: { order: Order }) {
 
   const poll = useCallback(async () => {
     try {
-      const res = await fetch(`/api/orders/${initial.orderNumber}/track`, { cache: 'no-store' });
+      const res = await fetch(`/api/orders/${initial.orderNumber}/track`, {
+        cache: 'no-store',
+        headers: contact ? { 'X-Aura-Contact': contact } : undefined,
+      });
       if (!res.ok) return;
       const next = (await res.json()) as TrackPayload;
       lastPollAt.current = Date.now();
@@ -87,7 +108,7 @@ export function Tracker({ order: initial }: { order: Order }) {
     } catch {
       /* a dropped poll is not an error state — the next one will land */
     }
-  }, [initial.orderNumber]);
+  }, [initial.orderNumber, contact]);
 
   useEffect(() => {
     void poll();
@@ -103,7 +124,7 @@ export function Tracker({ order: initial }: { order: Order }) {
     return () => clearInterval(id);
   }, []);
 
-  const state = data?.state;
+  const state = data?.state ?? initialState;
   const stage = state?.currentStage ?? order.status;
 
   // Interpolate between polls so the ring and the clock both move continuously.
@@ -144,7 +165,10 @@ export function Tracker({ order: initial }: { order: Order }) {
   async function cancel() {
     setCancelling(true);
     try {
-      const res = await fetch(`/api/orders/${order.orderNumber}/cancel`, { method: 'POST' });
+      const res = await fetch(`/api/orders/${order.orderNumber}/cancel`, {
+        method: 'POST',
+        headers: contact ? { 'X-Aura-Contact': contact } : undefined,
+      });
       const body = await res.json();
       if (!res.ok) {
         toast(body.error ?? 'Could not cancel.', 'error');
@@ -158,8 +182,16 @@ export function Tracker({ order: initial }: { order: Order }) {
     }
   }
 
+  /**
+   * Only the DERIVED stage may decide this — the server's cancel guard uses it
+   * too. Until that state exists we do not know the stage, and offering the
+   * button on the stale column offers an action the API answers with a 409.
+   */
   const cancellable =
-    order.status !== 'cancelled' && stage !== 'out_for_delivery' && stage !== 'delivered';
+    state != null &&
+    order.status !== 'cancelled' &&
+    stage !== 'out_for_delivery' &&
+    stage !== 'delivered';
 
   return (
     <div className="shell">
@@ -195,6 +227,13 @@ export function Tracker({ order: initial }: { order: Order }) {
                 {formatEta(etaMs)} away
               </p>
             ) : null}
+            {/* The heading swaps in place under the poll, which a screen reader
+                would otherwise never hear. Stage copy only — the ETA re-renders
+                once a second and would drown the one announcement worth making. */}
+            <div aria-live="polite" aria-atomic="true" className="sr-only">
+              {ORDER_STAGE_COPY[order.status === 'cancelled' ? 'cancelled' : stage]?.label}.{' '}
+              {ORDER_STAGE_COPY[order.status === 'cancelled' ? 'cancelled' : stage]?.detail}
+            </div>
           </div>
         </div>
       </header>
@@ -264,6 +303,7 @@ export function Tracker({ order: initial }: { order: Order }) {
                   </span>
                   <span className="mono muted" style={{ fontSize: 10 }}>
                     {new Date(s.startsAtMs).toLocaleTimeString('en-IN', {
+                      timeZone: 'Asia/Kolkata',
                       hour: '2-digit',
                       minute: '2-digit',
                     })}
@@ -309,7 +349,13 @@ export function Tracker({ order: initial }: { order: Order }) {
             <p className="muted" style={{ fontSize: 11, marginTop: 'var(--space-4)' }}>
               Paid by {order.paymentMethod === 'cash' ? 'cash' : 'UPI'} ·{' '}
               {order.fulfillment === 'pickup' ? 'collection' : 'delivery'} · placed{' '}
-              {new Date(order.placedAt).toLocaleString('en-IN')}
+              {/* Pinned to the shop's zone: without it the server formats in
+                  ITS zone and the guest's first client render disagrees. */}
+              {new Date(order.placedAt).toLocaleString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                dateStyle: 'medium',
+                timeStyle: 'short',
+              })}
             </p>
           </Reveal>
         </div>

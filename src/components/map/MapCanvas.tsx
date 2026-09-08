@@ -2,9 +2,11 @@
 /**
  * ONE Leaflet component, three call sites: tracking, origins, stores (§2.2).
  *
- * Free stack only (Part 6): OpenStreetMap data, CARTO Dark tiles, no API key,
- * no billing account. Attribution is visible on every instance — that is a
- * licence requirement, not a nicety.
+ * Free stack only (Part 6): OpenStreetMap data on Esri's keyless dark canvas —
+ * no API key, no billing account. CARTO's basemaps used to fill this role and
+ * were swapped out when they became key-gated: they kept returning 200 while
+ * stamping every tile "API KEY REQUIRED". Attribution is visible on every
+ * instance — that is a licence requirement, not a nicety.
  *
  * `preferCanvas: true` and marker movement as a requestAnimationFrame
  * transform, never `setInterval` + `setLatLng` (§16.3).
@@ -65,6 +67,7 @@ export default function MapCanvas({
   // touches the map must wait for it. Without this flag the marker effect runs
   // once, finds no map, returns — and no marker ever appears.
   const [ready, setReady] = useState(false);
+  const [tileFailure, setTileFailure] = useState(false);
 
   /* ── Init ─────────────────────────────────────────────────────────── */
   useEffect(() => {
@@ -85,12 +88,29 @@ export default function MapCanvas({
       });
       mapRef.current = map;
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        maxZoom: 19,
-        subdomains: 'abcd',
-      }).addTo(map);
+      // CARTO's basemaps became key-gated: the tiles still return 200, but every
+      // one is stamped "API KEY REQUIRED · carto.com/basemaps/apikey", so the
+      // map LOOKED fine to a status check while being unusable on screen.
+      // Esri's dark canvas is the equivalent keyless raster basemap. Its
+      // attribution is a licence condition, not decoration — leave it in place.
+      const tiles = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+        {
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, &copy; Esri, HERE, Garmin',
+          maxZoom: 16,
+          crossOrigin: true,
+        },
+      ).addTo(map);
+
+      // A basemap that silently fails is how the CARTO regression survived. If
+      // enough tiles error the map says so instead of showing an empty grid.
+      let tileErrors = 0;
+      tiles.on('tileerror', () => {
+        tileErrors += 1;
+        if (tileErrors === 4) setTileFailure(true);
+      });
+      tiles.on('tileload', () => setTileFailure(false));
 
       map.getContainer().setAttribute('role', 'application');
       map.getContainer().setAttribute('aria-label', ariaLabel);
@@ -254,7 +274,16 @@ export default function MapCanvas({
     rafRef.current = requestAnimationFrame(step);
   }
 
-  return <div ref={hostRef} className={`map-canvas${className ? ` ${className}` : ''}`} />;
+  return (
+    <div className={`map-shell${className ? ` ${className}` : ''}`}>
+      <div ref={hostRef} className="map-canvas" />
+      {tileFailure ? (
+        <p className="map-canvas__offline" role="status">
+          The basemap is not loading. The pins and routes below are still accurate.
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 function escapeHtml(s: string) {

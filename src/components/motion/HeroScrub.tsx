@@ -135,9 +135,17 @@ export function HeroScrub({ overlay }: HeroScrubProps) {
         const blob = await res.blob();
         if (cancelled) return;
         // createImageBitmap decodes off the main thread.
-        frames.current[i] = 'createImageBitmap' in window
+        const bmp = 'createImageBitmap' in window
           ? await createImageBitmap(blob)
           : await legacyDecode(blob);
+        // Re-checked AFTER the decode: the cleanup below only closes what was
+        // in `frames.current` when it ran, so a bitmap that lands later would
+        // be written into an array nothing iterates again and never freed.
+        if (cancelled) {
+          if ('close' in bmp) bmp.close();
+          return;
+        }
+        frames.current[i] = bmp;
       } catch {
         /* one missing frame is not worth failing the hero for */
       }
@@ -268,32 +276,41 @@ export function HeroScrub({ overlay }: HeroScrubProps) {
 
       return () => mm.revert();
     },
-    { scope: sectionRef, dependencies: [paint] },
+    { scope: sectionRef, dependencies: [paint], revertOnUpdate: true },
   );
 
   return (
-    <section ref={sectionRef} className="hero" aria-label="Bean to cup">
-      <canvas ref={canvasRef} className="hero__canvas" aria-hidden="true" />
-      <div className="hero__vignette" aria-hidden="true" />
-      {/* The canvas fades to --roast-950 as the pin releases, so the hero
-          hands off to the content beneath it rather than cutting (§14.6). */}
-      <div className="hero__handoff" aria-hidden="true" />
-      {overlay}
-      {!ready && (
-        <div className="hero__gate" aria-hidden="true">
-          <div className="hero__gate-bar">
-            <span style={{ transform: `scaleX(${loaded / 100})` }} />
+    /* `pin-host` is load-bearing, not decoration. ScrollTrigger's `pin` moves
+       this <section> into a `.pin-spacer` it injects into the section's PARENT.
+       Without this wrapper that parent is `.page-root`, whose child list React
+       also owns — so the moment React inserts or removes any sibling there it
+       calls insertBefore against a node that is no longer its child and throws
+       NotFoundError, killing the whole page subtree. Giving GSAP a host element
+       React never adds siblings to keeps the two owners off each other's turf. */
+    <div className="pin-host">
+      <section ref={sectionRef} className="hero" aria-label="Bean to cup">
+        <canvas ref={canvasRef} className="hero__canvas" aria-hidden="true" />
+        <div className="hero__vignette" aria-hidden="true" />
+        {/* The canvas fades to --roast-950 as the pin releases, so the hero
+            hands off to the content beneath it rather than cutting (§14.6). */}
+        <div className="hero__handoff" aria-hidden="true" />
+        {overlay}
+        {!ready && (
+          <div className="hero__gate" aria-hidden="true">
+            <div className="hero__gate-bar">
+              <span style={{ transform: `scaleX(${loaded / 100})` }} />
+            </div>
+            <p className="mono hero__gate-pct">{loaded}%</p>
           </div>
-          <p className="mono hero__gate-pct">{loaded}%</p>
-        </div>
-      )}
-      {/* The full sequence, described once, for anyone who cannot see it. */}
-      <p className="sr-only">
-        A macro sequence: green coffee seeds, the roast turning them brown, the grind, the
-        bloom as water hits fresh grounds, the pour, and finally a finished cup resting in
-        morning light.
-      </p>
-    </section>
+        )}
+        {/* The full sequence, described once, for anyone who cannot see it. */}
+        <p className="sr-only">
+          A macro sequence: green coffee seeds, the roast turning them brown, the grind, the
+          bloom as water hits fresh grounds, the pour, and finally a finished cup resting in
+          morning light.
+        </p>
+      </section>
+    </div>
   );
 }
 

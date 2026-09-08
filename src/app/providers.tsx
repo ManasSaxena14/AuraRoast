@@ -34,7 +34,7 @@ export function AppProviders({
   return (
     <ToastProvider>
       <ToastBridge />
-      <CartProvider catalogue={drinks}>
+      <CartProvider catalogue={drinks} modifiers={modifiers}>
         <ViewTransitions>
           <SmoothScroll>{children}</SmoothScroll>
         </ViewTransitions>

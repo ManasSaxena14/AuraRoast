@@ -16,8 +16,8 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { priceCart, findPromo } from '@/domain/pricing';
-import type { CartLine, Drink, PricedCart, SelectedModifier } from '@/domain/types';
+import { priceCart, findPromo, buildModifierIndex } from '@/domain/pricing';
+import type { CartLine, Drink, Modifier, PricedCart, SelectedModifier } from '@/domain/types';
 
 const STORAGE_KEY = 'aura-toast.cart.v2';
 
@@ -31,6 +31,7 @@ interface CartContextValue {
   isOpen: boolean;
   hydrated: boolean;
   add: (drink: Drink, modifiers: SelectedModifier[], quantity?: number) => void;
+  addLine: (line: { id: string; slug: string; name: string; imageUrl: string; price: number }, quantity?: number) => void;
   setQuantity: (lineId: string, quantity: number) => void;
   remove: (lineId: string) => void;
   clear: () => void;
@@ -49,9 +50,14 @@ function lineKey(drinkId: string, modifiers: SelectedModifier[]): string {
 
 export function CartProvider({
   catalogue,
+  modifiers,
   children,
 }: {
   catalogue: Drink[];
+  /* Passed so the optimistic client total is computed from the SAME stored
+     deltas the server re-prices against, instead of the ones cached in the
+     line. Without it a stale localStorage cart previews a stale price. */
+  modifiers: Modifier[];
   children: ReactNode;
 }) {
   const [lines, setLines] = useState<CartLine[]>([]);
@@ -92,17 +98,19 @@ export function CartProvider({
   }, [lines, fulfillment, promoCode, tip, hydrated]);
 
   const catalogueMap = useMemo(() => new Map(catalogue.map((d) => [d.id, d])), [catalogue]);
+  const modifierIndex = useMemo(() => buildModifierIndex(modifiers), [modifiers]);
 
   const priced = useMemo(
     () =>
       priceCart({
         lines,
         catalogue: catalogueMap,
+        modifiers: modifierIndex,
         fulfillment,
         tip,
         promo: findPromo(promoCode),
       }),
-    [lines, catalogueMap, fulfillment, tip, promoCode],
+    [lines, catalogueMap, modifierIndex, fulfillment, tip, promoCode],
   );
 
   const add = useCallback((drink: Drink, modifiers: SelectedModifier[], quantity = 1) => {
@@ -124,6 +132,31 @@ export function CartProvider({
           imageUrl: drink.imageUrl,
           quantity,
           modifiers,
+        },
+      ];
+    });
+  }, []);
+
+  /** Add a standalone item (e.g. a pairing) without constructing a full Drink. */
+  const addLine = useCallback((line: { id: string; slug: string; name: string; imageUrl: string; price: number }, quantity = 1) => {
+    const key = `pairing-${line.id}`;
+    setLines((prev) => {
+      const existing = prev.find((l) => l.lineId === key);
+      if (existing) {
+        return prev.map((l) =>
+          l.lineId === key ? { ...l, quantity: Math.min(20, l.quantity + quantity) } : l,
+        );
+      }
+      return [
+        ...prev,
+        {
+          lineId: key,
+          drinkId: line.id,
+          slug: line.slug,
+          name: line.name,
+          imageUrl: line.imageUrl,
+          quantity,
+          modifiers: [],
         },
       ];
     });
@@ -157,6 +190,7 @@ export function CartProvider({
     isOpen,
     hydrated,
     add,
+    addLine,
     setQuantity,
     remove,
     clear,

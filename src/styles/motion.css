@@ -68,7 +68,12 @@
   }
 }
 
-/* ── will-change is scoped and temporary (§16.3) ──────────────────────── */
+/* ── will-change is scoped and temporary (§16.3) ──────────────────────────
+   The one general-purpose promotion hook. Components set `data-animating`
+   when their tween starts and delete it when it lands (or is killed), so the
+   compositor layer exists for the length of the animation and not a frame
+   longer. <Reveal> and <ScrollScale> both drive this attribute.
+   ───────────────────────────────────────────────────────────────────────── */
 [data-animating='true'] {
   will-change: transform, opacity;
 }
@@ -82,10 +87,19 @@
   mix-blend-mode: screen;
 }
 
-/* ── Parallax layers are always transform, capped at 15% (§14.7 rule 5) ─ */
+/* ── Parallax layers are always transform, capped at 15% (§14.7 rule 5) ─
+   The promotion goes on the CHILD, because the child is what <Parallax>
+   actually translates — the wrapper never moves, so promoting it bought a
+   compositor layer for an element that has nothing to composite. And it is
+   scoped to guests the effect runs for: under reduced motion the tween is
+   never created, so there is nothing to promote. */
 .parallax {
-  will-change: transform;
   backface-visibility: hidden;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .parallax > * {
+    will-change: transform;
+  }
 }
 
 /* ── Marquee / ticker strip ───────────────────────────────────────────── */
@@ -202,7 +216,14 @@
   align-items: center;
   gap: var(--space-7);
   padding-right: var(--space-7);
-  will-change: transform;
+}
+/* The one honest exception to "promote on activity": the marquee ticks on
+   every frame it is mounted, so its rest state IS its active state. Still
+   scoped, because under reduced motion it never ticks at all. */
+@media (prefers-reduced-motion: no-preference) {
+  .marquee__track {
+    will-change: transform;
+  }
 }
 .marquee__item {
   display: inline-flex;
@@ -229,10 +250,13 @@
   box-shadow: var(--glow-aura);
 }
 
-/* ── ImageReveal ──────────────────────────────────────────────────── */
+/* ── ImageReveal ──────────────────────────────────────────────────────
+   No `will-change: clip-path`. The wipe is a once-per-page-load 0.9s tween,
+   and the hint would otherwise stand for the whole session on every
+   photograph on the page — the exact cost §16.3 exists to avoid. Clip-path is
+   not composited anyway, so the hint bought nothing even during the wipe. */
 .image-reveal {
   overflow: hidden;
-  will-change: clip-path;
 }
 .image-reveal > * {
   display: block;
@@ -245,15 +269,23 @@
   object-fit: cover;
 }
 
-/* ── Magnetic ─────────────────────────────────────────────────────── */
+/* ── Magnetic ─────────────────────────────────────────────────────────
+   Promoted only while the pointer is on it. <Magnetic> sets the attribute on
+   pointermove and drops it when the spring-back finishes, so a CTA sitting in
+   the footer of every page holds no layer while nobody is touching it. */
 .magnetic {
   display: inline-flex;
+}
+.magnetic[data-magnetic-active] {
   will-change: transform;
 }
 
 /* ── Velocity skew targets ────────────────────────────────────────── */
+/* No `will-change` here: ScrollSkew sets it alongside the transform and drops
+   both at rest (§16.3). Declared statically it would promote every section for
+   the life of the page, including under reduced motion where the skew never
+   runs at all. */
 [data-skew] {
-  will-change: transform;
   transform-origin: center center;
 }
 
@@ -266,5 +298,121 @@
   }
   [data-skew] {
     transform: none !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Opt-in micro-interaction utilities
+
+   Three classes, no JavaScript, nothing global. A page adds one where the
+   interaction earns it; nothing here fires on its own. Each has a
+   reduced-motion answer that keeps the AFFORDANCE and drops the movement —
+   a guest who has asked for less motion still has to be able to see what is
+   hoverable and where the keyboard focus is.
+
+     .hover-lift       a card that acknowledges the cursor
+     .underline-sweep  an editorial rule that draws under a link
+     .focus-bloom      the focus ring settling onto a control
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── .hover-lift — for a whole card or tile that is itself a link ─────
+   3px, not 8: the point is acknowledgement, not levitation. `:focus-within`
+   is included so a keyboard user reaching the card's link gets the same
+   response a mouse user gets.
+
+   Declares `transition`, which is a shorthand — put it on an element that
+   does not already own one (`.card`, a bare `<article>`), not on `.btn` or
+   `.drink-card`, both of which already animate their own hover states. */
+.hover-lift {
+  transition:
+    transform var(--dur-md) var(--ease-aura),
+    box-shadow var(--dur-md) var(--ease-aura),
+    border-color var(--dur-md) var(--ease-aura);
+}
+@media (hover: hover) and (pointer: fine) {
+  .hover-lift:hover {
+    transform: translate3d(0, -3px, 0);
+    box-shadow: var(--glow-aura);
+  }
+}
+.hover-lift:focus-within {
+  transform: translate3d(0, -3px, 0);
+  box-shadow: var(--glow-aura);
+}
+/* Presses settle rather than bounce — the lift is halved, not cancelled. */
+.hover-lift:active {
+  transform: translate3d(0, -1px, 0);
+  transition-duration: var(--dur-micro);
+}
+
+/* ── .underline-sweep — a text link that draws its own rule ───────────
+   The origin swaps between in and out, so the rule enters from the left and
+   leaves to the right: it reads as a single stroke passing through rather
+   than a bar being switched on and off. Sits on the element, so it works on
+   an <a> or a <button> with no extra markup. */
+.underline-sweep {
+  position: relative;
+  text-decoration: none;
+}
+.underline-sweep::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -0.16em;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.7;
+  transform: scaleX(0);
+  transform-origin: right center;
+  transition: transform var(--dur-md) var(--ease-aura);
+}
+.underline-sweep:hover::after,
+.underline-sweep:focus-visible::after {
+  transform: scaleX(1);
+  transform-origin: left center;
+}
+
+/* ── .focus-bloom — a motion treatment for keyboard focus ─────────────
+   The ring starts wide and contracts onto the control, which is what makes
+   the eye find it on a long page. The final state is identical to the global
+   :focus-visible in base.css, so this only ever changes HOW the ring arrives,
+   never whether it is there.
+
+   A keyframe rather than a transition, deliberately: `transition` is a
+   shorthand and would replace whatever transition the control already
+   declares for its own hover states. An animation composes with it. */
+.focus-bloom:focus-visible {
+  outline: 2px solid var(--aura-500);
+  outline-offset: 3px;
+  box-shadow: var(--glow-aura-strong);
+  animation: focus-bloom var(--dur-sm) var(--ease-bloom);
+}
+@keyframes focus-bloom {
+  from {
+    outline-offset: 10px;
+    box-shadow: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Keep the glow, the rule and the ring; drop the travel. */
+  .hover-lift,
+  .underline-sweep::after {
+    transition: none;
+  }
+  .hover-lift:hover,
+  .hover-lift:focus-within,
+  .hover-lift:active {
+    transform: none;
+  }
+  /* The rule appears at full width instead of sweeping — same signal, stated
+     rather than drawn. */
+  .underline-sweep:hover::after,
+  .underline-sweep:focus-visible::after {
+    transform: scaleX(1);
+  }
+  .focus-bloom:focus-visible {
+    animation: none;
   }
 }

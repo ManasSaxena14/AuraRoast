@@ -1,10 +1,11 @@
 /**
  * The repository API. Services depend on THIS, never on a driver.
  *
- * `DATABASE_URL` present  → the Neon/Drizzle path (`./schema.ts` is the schema).
- * `DATABASE_URL` absent   → the in-process adapter (`./memory/store.ts`).
+ * Every export below reads and writes the in-process adapter
+ * (`./memory/store.ts`). The Neon/Drizzle path is schema-only so far
+ * (`./schema.ts`, no query layer), so `DATABASE_URL` selects nothing yet.
  *
- * Both honour the same three correctness rules from Part 9. The atomic
+ * It honours the three correctness rules from Part 9. The atomic
  * capacity check below is the in-process equivalent of:
  *
  *   UPDATE reservation_slots
@@ -33,11 +34,26 @@ import type {
 } from '@/domain/types';
 import { catalogue, commit, db, nextOrderNumber, type IdempotencyRecord } from './memory/store';
 
-export const usingPostgres = Boolean(process.env.DATABASE_URL);
+/** False until a Drizzle query layer exists — `DATABASE_URL` alone wires nothing. */
+export const usingPostgres = false;
 
-/** Where the data actually lives, surfaced by `/api/health` and the admin page. */
+if (process.env.DATABASE_URL) {
+  // Otherwise a deploy with a real Neon URL looks healthy while every order,
+  // reservation and idempotency record lands in the ephemeral store and dies
+  // with the instance.
+  console.warn(
+    '[repositories] DATABASE_URL is set but unused — no Postgres query layer exists; ' +
+      'all data is going to the in-process store and will not survive a restart.',
+  );
+}
+
+/**
+ * Where the data actually lives, surfaced by `/api/health` and the admin page.
+ * It must follow the code path, not the env var: reporting `postgres-neon`
+ * off `DATABASE_URL` alone is the one lie the health check exists to catch.
+ */
 export function backendName(): 'postgres-neon' | 'in-process' {
-  return usingPostgres ? 'postgres-neon' : 'in-process';
+  return 'in-process';
 }
 
 /* ── Catalogue ──────────────────────────────────────────────────────── */

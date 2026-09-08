@@ -52,6 +52,11 @@ export function HorizontalScroll({
             invalidateOnRefresh: true,
             anticipatePin: 1,
             onUpdate: (self) => {
+              // `.hscroll` is `overflow: hidden`, which the browser will still
+              // scroll to reveal a focused chip in a clipped panel. GSAP owns
+              // the track's x, so any scrollLeft it left behind cancels the
+              // transform out — hand the box back before writing progress.
+              if (section.scrollLeft) section.scrollLeft = 0;
               section.style.setProperty('--h-progress', String(self.progress));
               const idx = Math.min(
                 itemCount - 1,
@@ -74,13 +79,18 @@ export function HorizontalScroll({
 
       return () => mm.revert();
     },
-    { scope: sectionRef, dependencies: [itemCount] },
+    { scope: sectionRef, dependencies: [itemCount], revertOnUpdate: true },
   );
 
   return (
-    <div ref={sectionRef} className={`hscroll${className ? ` ${className}` : ''}`}>
-      <div ref={trackRef} className="hscroll__track origins-track">
-        {children}
+    /* Wrapped for the same reason as HeroScrub: `pin` relocates this root into a
+       GSAP-injected `.pin-spacer`, so it must not sit directly in a parent whose
+       children React inserts into — see the note in HeroScrub.tsx. */
+    <div className="pin-host">
+      <div ref={sectionRef} className={`hscroll${className ? ` ${className}` : ''}`}>
+        <div ref={trackRef} className="hscroll__track origins-track">
+          {children}
+        </div>
       </div>
     </div>
   );

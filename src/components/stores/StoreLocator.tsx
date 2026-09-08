@@ -8,7 +8,7 @@
  * out to the whole country is a worse answer than either.
  */
 import dynamic from 'next/dynamic';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Reveal } from '@/components/motion/Reveal';
 import { CountUp } from '@/components/motion/CountUp';
 import { Button } from '@/components/ui/Button';
@@ -21,13 +21,22 @@ const MapCanvas = dynamic(() => import('@/components/map/MapCanvas'), {
   loading: () => <div className="skeleton" style={{ width: '100%', height: '100%' }} />,
 });
 
-const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+/** Every room is in India, so the badge reads the IST wall clock, not the visitor's. */
+const IST = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Kolkata',
+  weekday: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
 
-function openState(store: Store, now = new Date()) {
-  const hours = store.hours[DAYS[now.getDay()]];
+function openState(store: Store, now: Date) {
+  const parts = IST.formatToParts(now);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  const hours = store.hours[part('weekday').toLowerCase()];
   if (!hours) return { open: false, label: 'Closed today' };
   const [from, to] = hours;
-  const mins = now.getHours() * 60 + now.getMinutes();
+  const mins = Number(part('hour')) * 60 + Number(part('minute'));
   const toMins = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
   const open = mins >= toMins(from) && mins < toMins(to);
   return { open, label: open ? `Open until ${to}` : `Opens ${from}` };
@@ -46,6 +55,10 @@ export function StoreLocator({ stores }: { stores: Store[] }) {
   const [active, setActive] = useState<string | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
   const [near, setNear] = useState<{ lat: number; lng: number } | null>(null);
+  // /stores is prerendered: reading the clock during render would bake the build
+  // minute into the HTML and mismatch on hydration. Badge waits for mount.
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => setNow(new Date()), []);
 
   const visibleGroups = useMemo(
     () => (city ? groups.filter((g) => g.name === city) : groups),
@@ -120,8 +133,15 @@ export function StoreLocator({ stores }: { stores: Store[] }) {
 
         <Reveal key={`${city}-${near ? 'near' : 'city'}`} variant="slide" stagger={0.05} className="stack">
           {listed.map((s) => {
-            const state = openState(s);
+            const state = now ? openState(s, now) : null;
             return (
+              /* Deliberately NOT role="button". That role makes every child
+                 presentational, which hid this row's <h2> and swallowed the
+                 phone link below it — a nested-interactive violation. The row
+                 stays a plain article; the real control is the button in the
+                 heading, so keyboard and screen-reader users get one focus stop
+                 that announces itself, and the phone link stays reachable. The
+                 row-level click is a mouse affordance layered on top. */
               <article
                 key={s.id}
                 className="store-row"
@@ -129,28 +149,30 @@ export function StoreLocator({ stores }: { stores: Store[] }) {
                 onMouseEnter={() => setHovered(s.id)}
                 onMouseLeave={() => setHovered(null)}
                 onClick={() => setActive(s.id)}
-                onFocus={() => setHovered(s.id)}
-                onBlur={() => setHovered(null)}
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setActive(s.id);
-                  }
-                }}
               >
                 <div className="row-between">
                   <h2 style={{ fontSize: 'var(--text-lg)' }}>
-                    {s.name}
+                    <button
+                      type="button"
+                      className="store-row__select"
+                      aria-pressed={s.id === active}
+                      onClick={() => setActive(s.id)}
+                      onFocus={() => setHovered(s.id)}
+                      onBlur={() => setHovered(null)}
+                    >
+                      {s.name}
+                    </button>
                     <span className="store-row__city mono">{s.city}</span>
                   </h2>
-                  <span
-                    className="badge"
-                    style={{ color: state.open ? 'var(--verdant-500)' : 'var(--smoke-400)' }}
-                  >
-                    {state.open ? '● ' : '○ '}
-                    {state.label}
-                  </span>
+                  {state ? (
+                    <span
+                      className="badge"
+                      style={{ color: state.open ? 'var(--verdant-500)' : 'var(--smoke-400)' }}
+                    >
+                      {state.open ? '● ' : '○ '}
+                      {state.label}
+                    </span>
+                  ) : null}
                 </div>
                 <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>
                   {s.address}
@@ -159,7 +181,12 @@ export function StoreLocator({ stores }: { stores: Store[] }) {
                   {s.blurb}
                 </p>
                 <div className="row wrap" style={{ gap: 'var(--space-3)', marginTop: 'var(--space-2)' }}>
-                  <a className="link-arrow" href={`tel:${s.phone.replace(/\s/g, '')}`}>
+                  {/* Calling a room is not selecting it — keep the click off the row. */}
+                  <a
+                    className="link-arrow"
+                    href={`tel:${s.phone.replace(/\s/g, '')}`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     {s.phone}
                   </a>
                   {near ? (

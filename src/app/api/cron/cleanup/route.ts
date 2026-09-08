@@ -1,7 +1,6 @@
 import { sweepExpired } from '@/repositories';
 import { env } from '@/config/env';
-import { ForbiddenError } from '@/domain/errors';
-import { fail, ok } from '@/lib/http';
+import { fail, ok, requireBearer } from '@/lib/http';
 
 export const runtime = 'nodejs';
 
@@ -11,9 +10,9 @@ export const runtime = 'nodejs';
  */
 export async function POST(req: Request) {
   try {
-    if (env.CRON_SECRET && req.headers.get('authorization') !== `Bearer ${env.CRON_SECRET}`) {
-      throw new ForbiddenError('Bad cron secret.');
-    }
+    // `env.CRON_SECRET && ...` skipped the check whenever the variable was
+    // absent, so a deploy that forgot to set it published a destructive sweep.
+    requireBearer(req, env.CRON_SECRET, 'cron');
     return ok({ swept: await sweepExpired() });
   } catch (err) {
     return fail(err);

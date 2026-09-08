@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "lint": "node scripts/check-easing.mjs",
+    "lint": "npm run typecheck && npm run motion:lint",
     "motion:lint": "node scripts/check-easing.mjs",
     "test": "AURA_EPHEMERAL=1 node --test --experimental-strip-types --import ./tests/hooks.mjs 'tests/unit/*.test.ts'",
     "test:concurrency": "AURA_EPHEMERAL=1 node --test --experimental-strip-types --import ./tests/hooks.mjs 'tests/concurrency/*.test.ts'",

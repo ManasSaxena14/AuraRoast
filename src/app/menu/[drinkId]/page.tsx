@@ -12,6 +12,7 @@ import { DrinkBadges } from '@/components/ui/DrinkCard';
 import { Rating, SectionHead } from '@/components/ui/bits';
 import { ReviewList } from '@/components/menu/ReviewList';
 import { OriginMini } from '@/components/menu/OriginMini';
+import { PairingsSection } from '@/components/menu/PairingsSection';
 
 export async function generateStaticParams() {
   const drinks = await listDrinks();
@@ -105,6 +106,8 @@ export default async function DrinkPage({ params }: { params: Promise<{ drinkId:
         />
         <ReviewList drinkId={drink.id} initial={reviews} />
       </section>
+
+      <PairingsSection drinkName={drink.name} />
     </div>
   );
 }

@@ -7,9 +7,8 @@
   left: 0;
   right: 0;
   z-index: var(--z-header);
-  height: var(--header-h);
   display: flex;
-  align-items: center;
+  flex-direction: column;
   transition:
     height var(--dur-md) var(--ease-aura),
     background var(--dur-md) var(--ease-aura),
@@ -19,7 +18,6 @@
 }
 /* backdrop-filter and the background appear TOGETHER, past 80px (§14.6) */
 .header[data-scrolled] {
-  height: var(--header-h-shrunk);
   background: rgb(26 19 16 / 0.8);
   backdrop-filter: blur(12px);
   border-bottom-color: rgb(242 206 147 / 0.08);
@@ -32,6 +30,11 @@
   display: flex;
   align-items: center;
   gap: var(--space-5);
+  height: var(--header-h);
+  transition: height var(--dur-md) var(--ease-aura);
+}
+.header[data-scrolled] .header__inner {
+  height: var(--header-h-shrunk);
 }
 .header__brand {
   flex: none;
@@ -549,5 +552,77 @@
 @media (min-width: 1024px) {
   .header .logo__tag {
     display: block;
+  }
+}
+
+/* ── Announcement bar ──────────────────────────────────────────────── */
+.announce-bar {
+  width: 100%;
+  background: linear-gradient(90deg, var(--roast-800), rgb(216 166 87 / 0.12), var(--roast-800));
+  border-bottom: 1px solid rgb(242 206 147 / 0.08);
+  overflow: hidden;
+  animation: announce-in var(--dur-md) var(--ease-aura) both;
+}
+.announce-bar__inner {
+  max-width: 1440px;
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-block: 7px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--aura-300);
+}
+.announce-bar__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--aura-500);
+  box-shadow: var(--glow-aura);
+  animation: halo-pulse 2s var(--ease-aura) infinite;
+  flex: none;
+}
+.announce-bar__text {
+  flex: 1;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.announce-bar__close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgb(242 206 147 / 0.14);
+  border-radius: 50%;
+  background: none;
+  color: var(--smoke-400);
+  cursor: pointer;
+  transition: color var(--dur-sm) var(--ease-aura), border-color var(--dur-sm) var(--ease-aura);
+}
+.announce-bar__close:hover {
+  color: var(--mist-100);
+  border-color: rgb(242 206 147 / 0.3);
+}
+@keyframes announce-in {
+  from {
+    max-height: 0;
+    opacity: 0;
+  }
+  to {
+    max-height: 36px;
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .announce-bar {
+    animation: none;
+  }
+  .announce-bar__dot {
+    animation: none;
   }
 }

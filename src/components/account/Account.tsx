@@ -63,6 +63,24 @@ export function Account({
     setUnderline({ left: el.offsetLeft, width: el.offsetWidth });
   }, [tab]);
 
+  // role="tab" promises arrow-key movement, so honour it (roving tabindex below).
+  const onTabKeys = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const i = TABS.findIndex((t) => t.id === tab);
+      const to =
+        e.key === 'ArrowRight' ? (i + 1) % TABS.length
+        : e.key === 'ArrowLeft' ? (i - 1 + TABS.length) % TABS.length
+        : e.key === 'Home' ? 0
+        : e.key === 'End' ? TABS.length - 1
+        : -1;
+      if (to < 0) return;
+      e.preventDefault();
+      setTab(TABS[to].id);
+      tabsRef.current?.querySelector<HTMLElement>(`[data-tab="${TABS[to].id}"]`)?.focus();
+    },
+    [tab],
+  );
+
   const patchSub = useCallback(async (body: Record<string, unknown>) => {
     const res = await fetch('/api/subscriptions', {
       method: 'PATCH',
@@ -86,14 +104,17 @@ export function Account({
         <p className="muted">{user.email}</p>
       </header>
 
-      <div className="tabs" role="tablist" ref={tabsRef}>
+      <div className="tabs" role="tablist" ref={tabsRef} onKeyDown={onTabKeys}>
         {TABS.map((t) => (
           <button
             key={t.id}
+            id={`tab-${t.id}`}
             role="tab"
             data-tab={t.id}
             className="tab"
             aria-selected={tab === t.id}
+            aria-controls="account-panel"
+            tabIndex={tab === t.id ? 0 : -1}
             onClick={() => setTab(t.id)}
           >
             {t.label}
@@ -106,7 +127,16 @@ export function Account({
         />
       </div>
 
-      <div key={tab} className="account__panel" style={{ paddingTop: 'var(--space-6)' }}>
+      {/* One panel that cross-fades, so one stable id every tab points at. */}
+      <div
+        key={tab}
+        id="account-panel"
+        role="tabpanel"
+        aria-labelledby={`tab-${tab}`}
+        tabIndex={0}
+        className="account__panel"
+        style={{ paddingTop: 'var(--space-6)' }}
+      >
         {tab === 'orders' ? (
           orders.length === 0 ? (
             <EmptyState
@@ -127,7 +157,8 @@ export function Account({
                   </p>
                   <p className="mono muted" style={{ fontSize: 11 }}>
                     {ORDER_STAGE_COPY[o.derivedStage ?? o.status]?.label} ·{' '}
-                    {new Date(o.placedAt).toLocaleDateString('en-IN')}
+                    {/* Pinned to IST so the SSR'd day survives hydration. */}
+                    {new Date(o.placedAt).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}
                   </p>
                 </Link>
               ))}
@@ -152,9 +183,13 @@ export function Account({
                   </div>
                   <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>
                     {s.cadence} · {s.quantity} bag{s.quantity > 1 ? 's' : ''} · next{' '}
-                    {new Date(s.nextDelivery).toLocaleDateString('en-IN', {
+                    {/* nextDelivery is a bare date key — a calendar day, not an instant.
+                        Parse and format it in one zone or a visitor west of the host
+                        reads the delivery a day early. */}
+                    {new Date(`${s.nextDelivery}T00:00:00Z`).toLocaleDateString('en-IN', {
                       day: 'numeric',
                       month: 'long',
+                      timeZone: 'UTC',
                     })}
                   </p>
                   <div className="row wrap" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>

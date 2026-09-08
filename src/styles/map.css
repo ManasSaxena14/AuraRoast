@@ -1,3 +1,23 @@
+/* The map and its failure notice share one box, so the notice can sit over the
+   canvas without the canvas losing the height its parent gives it. */
+.map-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.map-canvas__offline {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 500;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  background: color-mix(in srgb, var(--roast-950) 88%, transparent);
+  border-top: var(--hairline);
+  color: var(--mist-100);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
 /* Leaflet overrides. `leaflet/dist/leaflet.css` is imported by MapCanvas —
    the library owns its own positioning; this file only restyles it for the
    dark canvas. Attribution stays visible on every instance: a licence

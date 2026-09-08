@@ -45,12 +45,42 @@ export function Barista({ drinks, modifiers }: { drinks: Drink[]; modifiers: Mod
     },
   ]);
   const listRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const restoreFocus = useRef<HTMLElement | null>(null);
   const { add, open: openCart } = useCart();
 
+  // Same modal contract as CartDrawer (§14.2): scroll is locked, so focus must
+  // not be able to walk out behind the panel where it cannot be scrolled into view.
   useEffect(() => {
     if (!open) return;
+    restoreFocus.current = document.activeElement as HTMLElement;
     lockScroll();
-    return () => unlockScroll();
+    panelRef.current?.querySelector<HTMLElement>('button, a, input')?.focus();
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+      if (e.key !== 'Tab' || !panelRef.current) return;
+      // Focus trap.
+      const focusables = panelRef.current.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      unlockScroll();
+      restoreFocus.current?.focus?.();
+    };
   }, [open]);
 
   useEffect(() => {
@@ -125,7 +155,7 @@ export function Barista({ drinks, modifiers }: { drinks: Drink[]; modifiers: Mod
       </button>
 
       {open ? (
-        <section className="barista" role="dialog" aria-label="AI Barista">
+        <section ref={panelRef} className="barista" role="dialog" aria-modal="true" aria-label="AI Barista">
           <header className="barista__head row-between">
             <div>
               <p className="eyebrow" style={{ marginBottom: 4 }}>
@@ -140,7 +170,7 @@ export function Barista({ drinks, modifiers }: { drinks: Drink[]; modifiers: Mod
             </button>
           </header>
 
-          <div className="barista__list" ref={listRef}>
+          <div className="barista__list" ref={listRef} role="log" aria-live="polite" aria-relevant="additions">
             {messages.map((m, i) => (
               <div key={i} className={`bubble bubble--${m.role}`}>
                 <p>{m.content}</p>
@@ -190,7 +220,13 @@ export function Barista({ drinks, modifiers }: { drinks: Drink[]; modifiers: Mod
               onChange={(e) => setInput(e.target.value)}
               placeholder="Ask for something…"
               aria-label="Message the barista"
-              disabled={busy}
+              // Matches the server's own cap in /api/chat. Without it a long
+              // paste is accepted here and then rejected with a bare 400.
+              maxLength={2000}
+              // readOnly, not disabled: disabling the focused input mid-send drops
+              // focus to <body> and the guest has to Tab the whole page back. The
+              // `busy` guard in send() is what actually stops a double-submit.
+              readOnly={busy}
             />
             <button className="btn btn--primary btn--sm" disabled={busy || !input.trim()}>
               Send

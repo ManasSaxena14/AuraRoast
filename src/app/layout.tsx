@@ -38,8 +38,21 @@ export const viewport: Viewport = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const [drinks, modifiers] = await Promise.all([listDrinks(), listModifiers()]);
 
+  /**
+   * `suppressHydrationWarning` sits on <html> and nowhere else.
+   *
+   * Extensions write their own attributes onto <html> before React loads — a
+   * password manager, a theme switcher, the `crxemulator` / `crxemulator-bridged`
+   * pair a Chrome extension adds — and React then reports a mismatch against
+   * server HTML that could never have contained them. It is the one element in
+   * the document the page does not fully own.
+   *
+   * React suppresses this exactly ONE level deep: attributes on <html> itself.
+   * A genuine mismatch anywhere inside the tree is still reported, so this
+   * silences the extension noise without hiding our own bugs.
+   */
   return (
-    <html lang="en-IN" className={fontClass}>
+    <html lang="en-IN" className={fontClass} suppressHydrationWarning>
       <body>
         {/* Genuinely necessary here: the header plus a pinned hero is a lot to
             tab past (§17.3). First focusable element on every page. */}

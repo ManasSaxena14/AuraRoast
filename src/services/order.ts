@@ -7,7 +7,14 @@
  *   2. placement is idempotency-key protected with three distinct outcomes
  *   3. the delivery plan and the OSRM route are written ONCE, at confirmation
  */
-import { assertTotalConsistent, findPromo, priceCart } from '@/domain/pricing';
+import { z } from 'zod';
+import {
+  MAX_LINE_QUANTITY,
+  assertTotalConsistent,
+  buildModifierIndex,
+  findPromo,
+  priceCart,
+} from '@/domain/pricing';
 import { buildDeliveryPlan, seededRandom } from '@/domain/delivery-plan';
 import { deriveTrackingState } from '@/domain/tracking';
 import { assertTransition, isCancellable } from '@/domain/state-machine';
@@ -29,6 +36,7 @@ import {
   getOrderByNumber,
   getStore,
   insertOrder,
+  listModifiers,
   listOrders,
   releaseIdempotencyKey,
   updateOrder,
@@ -42,10 +50,10 @@ export interface PlaceOrderInput {
   storeId: string;
   guestName: string;
   guestEmail: string;
-  guestPhone?: string;
-  addressLine?: string;
-  deliveryLat?: number;
-  deliveryLng?: number;
+  guestPhone?: string | null;
+  addressLine?: string | null;
+  deliveryLat?: number | null;
+  deliveryLng?: number | null;
   tip?: number;
   promoCode?: string | null;
   userId?: string | null;
@@ -59,27 +67,97 @@ export interface PlaceOrderResult {
   priceMismatch: boolean;
 }
 
+/**
+ * The body arrives straight off the wire, so nothing in it may be dereferenced
+ * before it is checked — a line without `modifiers` used to reach `hashPayload`
+ * as a TypeError and surface as a 500. Shape only: the three domain rules below
+ * (empty cart, contact email, delivery address) keep their own codes, and every
+ * price is still re-derived from the stored catalogue (§9.1).
+ */
+const inputSchema = z.object({
+  lines: z
+    .array(
+      z.object({
+        lineId: z.string().max(64).default(''),
+        drinkId: z.string().min(1),
+        slug: z.string().max(120).default(''),
+        name: z.string().max(200).default(''),
+        imageUrl: z.string().max(500).default(''),
+        quantity: z.number().int().min(1).max(MAX_LINE_QUANTITY),
+        modifiers: z
+          .array(
+            z.object({
+              kind: z.enum(['size', 'milk', 'syrup', 'shot', 'temperature']),
+              slug: z.string().min(1).max(64),
+              label: z.string().max(160).default(''),
+              priceDelta: z.number().default(0),
+              caffeineDelta: z.number().default(0),
+            }),
+          )
+          .max(20)
+          .default([]),
+      }),
+    )
+    .max(50)
+    .default([]),
+  fulfillment: z.enum(['delivery', 'pickup']),
+  paymentMethod: z.enum(['cash', 'upi']),
+  storeId: z.string().max(64).default(''),
+  guestName: z.string().max(120).default(''),
+  guestEmail: z.string().max(200).default(''),
+  guestPhone: z.string().max(32).nullish(),
+  addressLine: z.string().max(400).nullish(),
+  deliveryLat: z.number().min(-90).max(90).nullish(),
+  deliveryLng: z.number().min(-180).max(180).nullish(),
+  tip: z.number().int().min(0).max(1_000_000).optional(),
+  promoCode: z.string().max(32).nullish(),
+  userId: z.string().max(64).nullish(),
+  clientClaimedTotal: z.number().optional(),
+});
+
 export async function placeOrder(
-  input: PlaceOrderInput,
+  raw: unknown,
   idempotencyKey: string | null,
 ): Promise<PlaceOrderResult> {
   if (!idempotencyKey) throw new MissingIdempotencyKeyError();
-  if (!input.lines?.length) throw new DomainError('Your cart is empty.', 'empty_cart', 400);
-  if (!input.guestEmail?.includes('@')) {
+
+  const parsed = inputSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new DomainError('That order could not be read.', 'invalid_body', 400, parsed.error.issues);
+  }
+  const input: PlaceOrderInput = parsed.data;
+
+  if (!input.lines.length) throw new DomainError('Your cart is empty.', 'empty_cart', 400);
+  if (!input.guestEmail.includes('@')) {
     throw new DomainError('A contact email is required.', 'invalid_email', 400);
   }
   if (input.fulfillment === 'delivery' && !input.addressLine) {
     throw new DomainError('A delivery address is required.', 'address_required', 400);
   }
 
+  // Everything that is PERSISTED onto the order is hashed. Omitting storeId,
+  // name, phone, coordinates or userId let a materially different request
+  // replay as the original — a guest who switched pickup bar after a dropped
+  // response got a success screen for the store they had left (§9.3).
   const requestHash = await hashPayload({
-    lines: input.lines.map((l) => ({ d: l.drinkId, q: l.quantity, m: l.modifiers.map((m) => m.slug).sort() })),
+    lines: input.lines.map((l) => ({
+      d: l.drinkId,
+      q: l.quantity,
+      // Slugs are only unique WITHIN a kind, so the key carries both.
+      m: l.modifiers.map((m) => `${m.kind}:${m.slug}`).sort(),
+    })),
     fulfillment: input.fulfillment,
     paymentMethod: input.paymentMethod,
+    storeId: input.storeId,
+    name: input.guestName,
     email: input.guestEmail,
+    phone: input.guestPhone ?? null,
     address: input.addressLine ?? null,
+    lat: input.deliveryLat ?? null,
+    lng: input.deliveryLng ?? null,
     tip: input.tip ?? 0,
     promo: input.promoCode ?? null,
+    userId: input.userId ?? null,
   });
 
   const claim = await claimIdempotencyKey(idempotencyKey, requestHash);
@@ -97,10 +175,11 @@ export async function placeOrder(
 
   try {
     // ── Server-owned pricing (§9.1) ─────────────────────────────────
-    const catalogue = await catalogueMap();
+    const [catalogue, modifierList] = await Promise.all([catalogueMap(), listModifiers()]);
     const priced = priceCart({
       lines: input.lines,
       catalogue,
+      modifiers: buildModifierIndex(modifierList),
       fulfillment: input.fulfillment,
       tip: input.tip,
       promo: findPromo(input.promoCode),

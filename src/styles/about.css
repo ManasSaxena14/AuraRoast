@@ -1,0 +1,315 @@
+/* ── /about ──────────────────────────────────────────────────────────────
+   Page-scoped styles. Kept in its own file so the page can grow without
+   turning pages.css into a dumping ground. Everything here uses the tokens
+   in tokens.css — no raw colours, no raw easing curves (motion lint enforces
+   the second one). */
+
+/* ── Opener ─────────────────────────────────────────────────────────── */
+.about-open__title {
+  max-width: 14ch;
+}
+.about-open__title em {
+  font-style: italic;
+  color: var(--aura-300);
+}
+/* ── The ledger — the numbers strip, told as a list of facts rather than a
+      dashboard. Two of these appear: the scale of the company at the top,
+      the roast constants further down. ───────────────────────────────── */
+.about-ledger {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-6);
+  padding-block: var(--space-7);
+  border-block: var(--hairline);
+}
+.about-ledger__value {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: var(--text-2xl);
+  line-height: 1;
+  color: var(--aura-300);
+  font-variant-numeric: tabular-nums;
+}
+.about-ledger__label {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--mist-100);
+  margin-top: var(--space-3);
+}
+.about-ledger__detail {
+  color: var(--smoke-400);
+  font-size: var(--text-sm);
+  margin-top: 4px;
+  max-width: 26ch;
+}
+
+/* The roast ledger sits between a photograph and a set of answers, so it
+   carries its own breathing room rather than borrowing the section's. */
+.about-roast__frame + .about-ledger {
+  margin-top: var(--space-7);
+}
+
+/* ── Shared figure treatment ────────────────────────────────────────── */
+.about-belief__frame,
+.about-rooms__frame,
+.about-roast__frame,
+.about-close__frame,
+.about-person__media {
+  width: 100%;
+  border-radius: var(--radius-md);
+  border: var(--hairline);
+  background: var(--roast-900);
+}
+/* Every drifting photograph is taller than the frame that clips it, so the
+   ±6% scroll drift never pulls an empty edge into view. Percentage `top`
+   resolves against the frame's height; a percentage margin would resolve
+   against its WIDTH and tear a gap open on the wide crops. */
+.about-belief__frame img,
+.about-rooms__frame img,
+.about-roast__frame img,
+.about-close__frame img {
+  position: relative;
+  height: 116%;
+  top: -8%;
+}
+.about-caption {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--smoke-400);
+  margin-top: var(--space-3);
+}
+
+/* ── What we believe ────────────────────────────────────────────────── */
+.about-belief {
+  display: grid;
+  gap: var(--space-7);
+  align-items: start;
+}
+/* Wide on a phone, where the media sits above the copy; portrait beside it on
+   a desktop, where a tall frame is what makes the sticky column read as a
+   plate rather than a banner. */
+.about-belief__frame {
+  aspect-ratio: 3 / 2;
+}
+.about-belief__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+@media (min-width: 900px) {
+  .about-belief {
+    grid-template-columns: 0.95fr 1fr;
+    gap: var(--space-9);
+  }
+  .about-belief__frame {
+    aspect-ratio: 4 / 5;
+  }
+  .about-belief__media {
+    position: sticky;
+    top: calc(var(--header-h) + var(--space-6));
+  }
+  .about-belief__body {
+    gap: var(--space-6);
+  }
+}
+
+/* ── The people ─────────────────────────────────────────────────────── */
+.about-people {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-9);
+}
+.about-person {
+  display: grid;
+  gap: var(--space-5);
+  align-items: center;
+}
+.about-person__media {
+  position: relative;
+  aspect-ratio: 3 / 2;
+}
+/* The parallax layer is inset beyond the frame so the ±8% drift never exposes
+   an edge — the same trick the origin tiles use (§14.7 rule 5). */
+.about-person__media .parallax {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -10%;
+  height: 120%;
+}
+.about-person__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+.about-person__meta {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--aura-500);
+}
+.about-person__where {
+  color: var(--mist-100);
+  font-size: var(--text-sm);
+  opacity: 0.8;
+}
+.about-person__harvest {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--smoke-400);
+}
+@media (min-width: 900px) {
+  .about-person {
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-8);
+  }
+  /* Alternating sides. The DOM order is always photograph → text, so the
+     reading order stays the same for a screen reader and a keyboard. */
+  .about-person[data-flip] .about-person__media {
+    order: 2;
+  }
+}
+
+/* ── The rooms ──────────────────────────────────────────────────────── */
+.about-rooms {
+  display: grid;
+  gap: var(--space-7);
+  align-items: start;
+}
+.about-rooms__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  align-items: flex-start;
+}
+.about-rooms__frame {
+  aspect-ratio: 3 / 2;
+}
+.about-cities {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.about-city {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-block: var(--space-3);
+  border-top: var(--hairline);
+}
+.about-city:last-child {
+  border-bottom: var(--hairline);
+}
+.about-city__name {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: var(--text-lg);
+  letter-spacing: -0.02em;
+}
+.about-city__count {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--smoke-400);
+}
+.about-note {
+  margin-top: var(--space-5);
+  padding: var(--space-5);
+  border: var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--roast-900);
+  box-shadow: var(--edge-hi);
+}
+.about-note__where {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--aura-500);
+  margin-bottom: var(--space-2);
+}
+@media (min-width: 900px) {
+  .about-rooms {
+    grid-template-columns: 1fr 0.95fr;
+    gap: var(--space-9);
+  }
+  .about-rooms__media {
+    position: sticky;
+    top: calc(var(--header-h) + var(--space-6));
+  }
+}
+
+/* ── The roast ──────────────────────────────────────────────────────── */
+.about-roast__frame {
+  aspect-ratio: 2 / 1;
+}
+.about-answers {
+  margin-top: var(--space-8);
+  max-width: var(--measure);
+}
+
+/* ── The handoff ────────────────────────────────────────────────────── */
+.about-close {
+  /* The last thing above the footer, so it keeps its own bottom margin
+     rather than letting the two blocks touch. */
+  padding-bottom: clamp(var(--space-9), 12vw, var(--space-10));
+}
+.about-close__frame {
+  aspect-ratio: 2 / 1;
+}
+.about-close__body {
+  max-width: 720px;
+  margin-inline: auto;
+  text-align: center;
+  padding-top: var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  align-items: center;
+}
+/* `.eyebrow` is a flex row with a leading rule; centring it needs the row
+   centred, not the text. */
+.about-close__eyebrow {
+  justify-content: center;
+}
+.about-close__title {
+  font-size: var(--text-2xl);
+  line-height: 1.08;
+  font-family: var(--font-display), Georgia, serif;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+.about-close__lede {
+  margin-inline: auto;
+}
+.about-close__ctas {
+  justify-content: center;
+  margin-top: var(--space-6);
+}
+@media (max-width: 639px) {
+  .about-roast__frame,
+  .about-close__frame {
+    aspect-ratio: 3 / 2;
+  }
+}
+
+/* Nothing drifts under reduced motion, so the overhang that covers the drift
+   has no reason to crop the photograph either — the frames sit flush and the
+   images stay fully visible (§17.2). */
+@media (prefers-reduced-motion: reduce) {
+  .about-belief__frame img,
+  .about-rooms__frame img,
+  .about-roast__frame img,
+  .about-close__frame img {
+    height: 100%;
+    top: 0;
+  }
+  .about-person__media .parallax {
+    top: 0;
+    height: 100%;
+  }
+}

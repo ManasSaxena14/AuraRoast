@@ -11,6 +11,10 @@
 import { useRef, type ReactNode } from 'react';
 import { gsap, useGSAP } from './gsap';
 
+/** Progress is reported in 1% steps. Callers drive React state off this, and a
+ *  raw scrub emits a new float on every single frame. */
+const PROGRESS_STEP = 100;
+
 export function DrawPath({
   children,
   className,
@@ -27,20 +31,41 @@ export function DrawPath({
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
+  // Deliberately not a dependency: callers pass a setState or an inline
+  // closure, and re-running the whole ScrollTrigger setup on every parent
+  // render would re-measure and re-draw the line mid-scroll.
+  const progressRef = useRef(onProgress);
+  progressRef.current = onProgress;
+
   useGSAP(
     () => {
       const root = ref.current;
       if (!root) return;
-      const paths = Array.from(root.querySelectorAll<SVGPathElement>('[data-draw]'));
+      // SVGGeometryElement, not SVGPathElement: `line`, `polyline` and `circle`
+      // all measure with getTotalLength() and all read as a drawn stroke.
+      const paths = Array.from(root.querySelectorAll<SVGGeometryElement>('[data-draw]'));
       if (!paths.length) return;
 
       const mm = gsap.matchMedia();
 
       mm.add('(prefers-reduced-motion: no-preference)', () => {
-        const tweens = paths.map((path) => {
-          const length = path.getTotalLength();
-          gsap.set(path, { strokeDasharray: length, strokeDashoffset: length });
-          return gsap.to(path, {
+        // Re-measured on every refresh rather than once at mount: the viewBox
+        // is fluid, so a resize changes the rendered length of the stroke and
+        // a stale dasharray leaves the line either short or never closing.
+        const measure = () => {
+          for (const path of paths) {
+            const length = path.getTotalLength();
+            // A path inside a display:none ancestor measures 0. Writing
+            // `dasharray: 0` there would leave the stroke solid and undrawable.
+            if (!length) continue;
+            gsap.set(path, { strokeDasharray: length, strokeDashoffset: length });
+          }
+        };
+        measure();
+
+        let lastStep = -1;
+        const tweens = paths.map((path, i) =>
+          gsap.to(path, {
             strokeDashoffset: 0,
             ease: 'none',
             scrollTrigger: {
@@ -49,10 +74,21 @@ export function DrawPath({
               end,
               scrub: 0.4,
               invalidateOnRefresh: true,
-              onUpdate: onProgress ? (self) => onProgress(self.progress) : undefined,
+              onRefreshInit: i === 0 ? measure : undefined,
+              // One reporter for the whole group, quantised to whole percent.
+              onUpdate:
+                i === 0
+                  ? (self) => {
+                      const step = Math.round(self.progress * PROGRESS_STEP);
+                      if (step === lastStep) return;
+                      lastStep = step;
+                      progressRef.current?.(step / PROGRESS_STEP);
+                    }
+                  : undefined,
             },
-          });
-        });
+          }),
+        );
+
         return () => {
           tweens.forEach((t) => {
             t.scrollTrigger?.kill();
@@ -62,9 +98,12 @@ export function DrawPath({
         };
       });
 
+      // Drawn, in full, instantly — and the caller is told the line has passed
+      // everything, so any labels it gates on progress are lit rather than
+      // stuck at their dimmed state (§14.7 rule 8).
       mm.add('(prefers-reduced-motion: reduce)', () => {
         gsap.set(paths, { strokeDasharray: 'none', strokeDashoffset: 0 });
-        onProgress?.(1);
+        progressRef.current?.(1);
       });
 
       return () => mm.revert();

@@ -44,10 +44,17 @@ interface EventView {
 
 export function Reserve({ stores }: { stores: Store[] }) {
   const [tab, setTab] = useState<'table' | 'event'>('table');
-  const dates = useMemo(() => bookableDates(new Date(), 14), []);
   const cityGroups = useMemo(() => storesByCity(stores), [stores]);
   const [storeId, setStoreId] = useState(stores[0]?.id ?? '');
-  const [date, setDate] = useState(dates[0]);
+  /**
+   * The strip is built from local-timezone date keys, so it cannot be computed
+   * during SSR: a UTC server and an IST guest disagree about which day is
+   * today, which is a hydration mismatch AND a slot grid loading a different
+   * day than the one the HTML highlighted. Built after mount instead, with the
+   * same skeleton treatment the slot grid already uses.
+   */
+  const [dates, setDates] = useState<string[] | null>(null);
+  const [date, setDate] = useState<string | null>(null);
   const [slots, setSlots] = useState<SlotView[] | null>(null);
   const [events, setEvents] = useState<EventView[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -61,6 +68,13 @@ export function Reserve({ stores }: { stores: Store[] }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const next = bookableDates(new Date(), 14);
+    setDates(next);
+    setDate(next[0]);
+  }, []);
+
+  useEffect(() => {
+    if (!date) return;
     let cancelled = false;
     setSlots(null);
     setSelected(null);
@@ -114,6 +128,10 @@ export function Reserve({ stores }: { stores: Store[] }) {
           return;
         }
         setConfirmed(data.reservation);
+      } catch {
+        // A dropped connection must not look like a silent success (Part 15).
+        setError('The connection dropped — nothing was booked. Try again.');
+        toast('The connection dropped.', 'error');
       } finally {
         setBusy(false);
       }
@@ -187,21 +205,32 @@ export function Reserve({ stores }: { stores: Store[] }) {
             <div className="stack-sm">
               <span className="field__label">Date</span>
               <div className="date-scroller">
-                {dates.map((d) => {
-                  const dd = new Date(`${d}T00:00:00`);
-                  return (
-                    <button
-                      key={d}
-                      className="date-pill"
-                      data-selected={d === date || undefined}
-                      onClick={() => setDate(d)}
-                    >
-                      <small>{dd.toLocaleDateString('en-IN', { weekday: 'short' })}</small>
-                      {dd.getDate()}
-                      <small>{dd.toLocaleDateString('en-IN', { month: 'short' })}</small>
-                    </button>
-                  );
-                })}
+                {dates === null
+                  ? Array.from({ length: 14 }).map((_, i) => (
+                      <div
+                        key={i}
+                        className="skeleton"
+                        style={{ flex: 'none', minWidth: 70, height: 74 }}
+                      />
+                    ))
+                  : dates.map((d) => {
+                      const dd = new Date(`${d}T00:00:00`);
+                      return (
+                        <button
+                          key={d}
+                          className="date-pill"
+                          // data-selected paints it; aria-pressed is what a
+                          // screen reader actually hears (§14.6).
+                          aria-pressed={d === date}
+                          data-selected={d === date || undefined}
+                          onClick={() => setDate(d)}
+                        >
+                          <small>{dd.toLocaleDateString('en-IN', { weekday: 'short' })}</small>
+                          {dd.getDate()}
+                          <small>{dd.toLocaleDateString('en-IN', { month: 'short' })}</small>
+                        </button>
+                      );
+                    })}
               </div>
             </div>
 
@@ -221,6 +250,7 @@ export function Reserve({ stores }: { stores: Store[] }) {
                     <button
                       key={s.id}
                       className="slot"
+                      aria-pressed={selected === s.id}
                       data-selected={selected === s.id || undefined}
                       disabled={s.state === 'full' || s.state === 'past'}
                       onClick={() => setSelected(s.id)}
@@ -258,6 +288,7 @@ export function Reserve({ stores }: { stores: Store[] }) {
                   <button
                     key={ev.id}
                     className="store-row"
+                    aria-pressed={selected === ev.id}
                     data-active={selected === ev.id || undefined}
                     disabled={ev.state === 'full' || ev.state === 'past'}
                     onClick={() => setSelected(ev.id)}

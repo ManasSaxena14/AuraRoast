@@ -280,3 +280,16 @@ export interface User {
   isAdmin: boolean;
   createdAt: string;
 }
+
+export interface Pairing {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  pairingNote: string;
+  imageUrl: string;
+  price: Paise;
+  allergens: string[];
+  isAvailable: boolean;
+  sortOrder: number;
+}

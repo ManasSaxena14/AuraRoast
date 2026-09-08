@@ -8,10 +8,16 @@ export const SITE = {
 
 export const NAV = [
   { href: '/menu', label: 'Menu' },
+  { href: '/pairings', label: 'Pairings' },
+  { href: '/about', label: 'About' },
+  { href: '/locations', label: 'Locations' },
   { href: '/origins', label: 'Origins' },
-  { href: '/guides', label: 'Guides' },
+  // Labels are the guest's words; hrefs must be the routes that exist. Header
+  // derives aria-current from `pathname.startsWith(href)`, so every entry has
+  // to be a real segment prefix.
   { href: '/reservations', label: 'Reserve' },
-  { href: '/stores', label: 'Stores' },
+  { href: '/track', label: 'Track' },
+  { href: '/checkout', label: 'Order' },
 ] as const;
 
 export const FOOTER_NAV = [

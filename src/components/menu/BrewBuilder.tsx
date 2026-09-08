@@ -12,7 +12,7 @@
  * the server uses, then re-quoted against `/api/menu/quote` so the guest never
  * sees a number the server would disagree with (§9.1).
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { formatMoney } from '@/domain/money';
 import { priceLine } from '@/domain/pricing';
 import { MODIFIER_LABELS, MODIFIER_ORDER, buildPreview } from '@/domain/brew-plan';
@@ -115,6 +115,38 @@ export function BrewBuilder({
     });
   }, []);
 
+  // role="radio" promises arrow-key selection, so it has to be honoured: a
+  // roving tabindex puts one stop per group in the Tab order and the arrows
+  // move the checked option, wrapping, as the ARIA radio pattern specifies.
+  const onOptionKey = useCallback(
+    (e: KeyboardEvent<HTMLDivElement>, options: Modifier[], index: number) => {
+      const last = options.length - 1;
+      let next: number;
+      switch (e.key) {
+        case 'ArrowRight':
+        case 'ArrowDown':
+          next = index >= last ? 0 : index + 1;
+          break;
+        case 'ArrowLeft':
+        case 'ArrowUp':
+          next = index <= 0 ? last : index - 1;
+          break;
+        case 'Home':
+          next = 0;
+          break;
+        case 'End':
+          next = last;
+          break;
+        default:
+          return;
+      }
+      e.preventDefault();
+      choose(options[next]);
+      e.currentTarget.querySelectorAll<HTMLButtonElement>('button')[next]?.focus();
+    },
+    [choose],
+  );
+
   const groups = MODIFIER_ORDER.filter((k) => drink.allowedModifiers.includes(k));
   // Only a quote for THIS exact configuration counts. Anything else and the
   // instantly-computed local price stands until the server catches up.
@@ -129,16 +161,25 @@ export function BrewBuilder({
           .filter((m) => m.kind === kind)
           .sort((a, b) => a.sortOrder - b.sortOrder);
         const active = selected.find((s) => s.kind === kind);
+        const activeIndex = options.findIndex((o) => o.slug === active?.slug);
+        // Nothing checked yet still needs one Tab stop, so fall back to the first.
+        const tabStop = activeIndex < 0 ? 0 : activeIndex;
         return (
           <fieldset key={kind} className="builder-group">
             <legend className="field__label">{MODIFIER_LABELS[kind]}</legend>
-            <div className="builder-options" role="radiogroup" aria-label={MODIFIER_LABELS[kind]}>
-              {options.map((m) => (
+            <div
+              className="builder-options"
+              role="radiogroup"
+              aria-label={MODIFIER_LABELS[kind]}
+              onKeyDown={(e) => onOptionKey(e, options, activeIndex)}
+            >
+              {options.map((m, i) => (
                 <button
                   key={m.id}
                   type="button"
                   role="radio"
                   aria-checked={active?.slug === m.slug}
+                  tabIndex={i === tabStop ? 0 : -1}
                   className="chip"
                   data-active={active?.slug === m.slug || undefined}
                   onClick={() => choose(m)}

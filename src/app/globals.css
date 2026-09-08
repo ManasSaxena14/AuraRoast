@@ -5,4 +5,7 @@
 @import '../styles/transitions.css';
 @import '../styles/layout.css';
 @import '../styles/pages.css';
+@import '../styles/pairings.css';
+@import '../styles/about.css';
+@import '../styles/locations.css';
 @import '../styles/map.css';

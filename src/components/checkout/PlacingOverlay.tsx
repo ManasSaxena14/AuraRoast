@@ -39,9 +39,15 @@ export function PlacingOverlay({
   orderNumber?: string | null;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const index = STEPS.findIndex((s) => s.id === stage);
+  const stepIndex = STEPS.findIndex((s) => s.id === stage);
   const done = stage === 'done';
   const failed = stage === 'failed';
+  // `failed` is not a step, so it has no index of its own. Remember the step
+  // that was in flight, otherwise the failure wipes every tick back to "todo"
+  // and the ⚠ never renders.
+  const lastLive = useRef(0);
+  if (stepIndex >= 0) lastLive.current = stepIndex;
+  const index = failed ? lastLive.current : stepIndex;
   const progress = failed ? 0 : done ? 1 : Math.max(0.08, (index + 1) / (STEPS.length + 1));
 
   useGSAP(

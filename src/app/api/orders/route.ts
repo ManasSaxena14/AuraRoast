@@ -1,6 +1,6 @@
 import { placeOrder } from '@/services/order';
 import { fail, ok, rateLimit } from '@/lib/http';
-import { MissingIdempotencyKeyError } from '@/domain/errors';
+import { DomainError, MissingIdempotencyKeyError } from '@/domain/errors';
 
 export const runtime = 'nodejs';
 
@@ -16,7 +16,15 @@ export async function POST(req: Request) {
     const key = req.headers.get('Idempotency-Key');
     if (!key) throw new MissingIdempotencyKeyError();
 
-    const body = await req.json();
+    // A non-JSON body throws a SyntaxError here, which `fail` cannot classify
+    // and reports as a 500. An unreadable request is a 400.
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      throw new DomainError('Malformed JSON body.', 'invalid_json', 400);
+    }
+
     const { order, replayed, priceMismatch } = await placeOrder(body, key);
 
     return ok(

@@ -9,8 +9,11 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+// `.pathname` is percent-encoded — a checkout under a path with a space in it
+// (this one) would send every readdirSync at a directory that does not exist.
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SRC = join(ROOT, 'src');
 const ALLOWED = join(SRC, 'styles', 'tokens.css');
 const EXTS = new Set(['.css', '.tsx', '.ts']);

@@ -3,6 +3,15 @@
    box reserved here BEFORE anything animates (§16.2 CLS rule).
    ═══════════════════════════════════════════════════════════════ */
 
+/* Wrapper around every GSAP-pinned root. `display: contents` means it produces
+   no box at all, so the `.pin-spacer` GSAP injects inside it lays out exactly
+   where the section used to — the layout is unchanged. Its only job is to exist
+   in the DOM as the node React inserts siblings against, instead of the section
+   GSAP is about to move. See the comment in HeroScrub.tsx. */
+.pin-host {
+  display: contents;
+}
+
 /* ── Hero (pinned scrub) ──────────────────────────────────────────── */
 .hero {
   position: relative;
@@ -11,6 +20,78 @@
   width: 100%;
   overflow: hidden;
   background: var(--roast-950);
+}
+/* Site-opening brand gate — fades out to reveal the hero scrub.
+   Always mounted, shown by attribute: mounting it conditionally made React
+   insert a sibling next to the pinned hero, which is the crash described in
+   HeroScrub.tsx. It is `position: fixed`, so keeping it in the tree costs
+   nothing in layout. */
+.brand-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: none;
+  place-items: center;
+  background: var(--roast-950);
+  pointer-events: none;
+}
+.brand-gate[data-active='true'] {
+  display: grid;
+  animation: gate-out 600ms var(--ease-aura) 750ms forwards;
+}
+.brand-gate__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+}
+.brand-gate__logo {
+  animation: gate-logo-in 600ms var(--ease-aura) both;
+}
+.brand-gate__arc {
+  animation: arc-draw 500ms var(--ease-aura) 100ms forwards;
+}
+.brand-gate__steam {
+  animation: arc-draw 400ms var(--ease-aura) 400ms forwards;
+}
+.brand-gate__steam--delayed {
+  animation-delay: 550ms;
+}
+.brand-gate__wordmark {
+  font-family: var(--font-display), serif;
+  font-size: var(--text-lg);
+  letter-spacing: 0.24em;
+  color: var(--mist-100);
+  opacity: 0;
+  animation: wordmark-in 400ms var(--ease-aura) 350ms forwards;
+}
+@keyframes gate-logo-in {
+  from { opacity: 0; transform: scale(0.85); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes arc-draw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes wordmark-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes gate-out {
+  to { opacity: 0; visibility: hidden; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand-gate[data-active='true'] {
+    animation: gate-out 50ms linear 1ms forwards;
+  }
+  .brand-gate__arc,
+  .brand-gate__steam {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .brand-gate__wordmark {
+    animation: none;
+    opacity: 1;
+  }
 }
 .hero__canvas {
   position: absolute;
@@ -1036,6 +1117,20 @@ fieldset.builder-group {
   border-color: var(--aura-500);
   background: var(--roast-700);
 }
+/* The row's real control. It carries the heading's own type so the row looks
+   unchanged, while giving keyboard and screen-reader users something that is
+   actually a button — the row itself must not be one (see StoreLocator.tsx). */
+.store-row__select {
+  all: unset;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.store-row__select:focus-visible {
+  outline: 2px solid var(--aura-500);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
 .stores-map {
   aspect-ratio: 4 / 3;
   border-radius: var(--radius-md);
@@ -1106,9 +1201,9 @@ fieldset.builder-group {
   padding: calc(var(--header-h) + var(--space-7)) var(--gutter);
 }
 
-/* ── Admin — deliberately plainer ─────────────────────────────────── */
+/* ── Admin — professional, enhanced ─────────────────────────────────── */
 .admin {
-  padding-top: calc(var(--header-h) + var(--space-7));
+  padding-top: calc(var(--header-h) + var(--announce-h) + var(--space-7));
   padding-bottom: var(--space-8);
 }
 .admin-tabs {
@@ -1116,6 +1211,35 @@ fieldset.builder-group {
   gap: var(--space-2);
   margin-bottom: var(--space-5);
   flex-wrap: wrap;
+}
+.admin-filters {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: var(--space-4);
+}
+.admin-search {
+  flex: 1 1 240px;
+  min-width: 180px;
+}
+.admin-filter-select {
+  min-height: 40px;
+  padding: var(--space-2) var(--space-4);
+  background: var(--roast-800);
+  border: 1px solid rgb(242 206 147 / 0.1);
+  border-radius: var(--radius-sm);
+  color: var(--mist-100);
+  font-size: var(--text-sm);
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--smoke-400) 50%),
+    linear-gradient(135deg, var(--smoke-400) 50%, transparent 50%);
+  background-position:
+    calc(100% - 20px) calc(50% + 1px),
+    calc(100% - 14px) calc(50% + 1px);
+  background-size: 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: var(--space-8);
 }
 .stat-grid {
   display: grid;
@@ -1128,23 +1252,36 @@ fieldset.builder-group {
   border: var(--hairline);
   border-radius: var(--radius-md);
   background: var(--roast-800);
+  position: relative;
+  overflow: hidden;
+}
+.stat::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--aura-500), transparent);
+  opacity: 0.4;
 }
 .stat__value {
   font-family: var(--font-mono), monospace;
   font-size: var(--text-xl);
   color: var(--aura-500);
+  line-height: 1.1;
 }
 .stat__label {
   font-size: 10px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--smoke-400);
-  margin-top: 4px;
+  margin-top: 6px;
 }
 
 /* ── Page header used by the inner routes ─────────────────────────── */
 .page-head {
-  padding-top: calc(var(--header-h) + var(--space-8));
+  padding-top: calc(var(--header-h) + var(--announce-h) + var(--space-7));
   padding-bottom: var(--space-6);
   display: flex;
   flex-direction: column;
@@ -1159,6 +1296,9 @@ fieldset.builder-group {
 }
 .page-head--center h1 {
   max-width: 22ch;
+}
+.page-head--tight {
+  padding-top: calc(var(--header-h) + var(--announce-h) + var(--space-5));
 }
 
 .breadcrumb {
