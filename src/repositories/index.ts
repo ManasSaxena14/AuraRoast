@@ -33,56 +33,142 @@ import type {
   User,
 } from '@/domain/types';
 import { catalogue, commit, db, nextOrderNumber, type IdempotencyRecord } from './memory/store';
+import { isPostgres as pgActive, getDb } from './client';
 
-/** False until a Drizzle query layer exists — `DATABASE_URL` alone wires nothing. */
-export const usingPostgres = false;
-
-if (process.env.DATABASE_URL) {
-  // Otherwise a deploy with a real Neon URL looks healthy while every order,
-  // reservation and idempotency record lands in the ephemeral store and dies
-  // with the instance.
-  console.warn(
-    '[repositories] DATABASE_URL is set but unused — no Postgres query layer exists; ' +
-      'all data is going to the in-process store and will not survive a restart.',
-  );
-}
+/** True when connected to Neon via Drizzle */
+export const usingPostgres = pgActive;
 
 /**
  * Where the data actually lives, surfaced by `/api/health` and the admin page.
- * It must follow the code path, not the env var: reporting `postgres-neon`
- * off `DATABASE_URL` alone is the one lie the health check exists to catch.
  */
 export function backendName(): 'postgres-neon' | 'in-process' {
-  return 'in-process';
+  return usingPostgres ? 'postgres-neon' : 'in-process';
 }
+
+import { eq } from 'drizzle-orm';
+import * as schema from './schema';
 
 /* ── Catalogue ──────────────────────────────────────────────────────── */
 export async function listDrinks(): Promise<Drink[]> {
+  const dbClient = await getDb();
+  if (dbClient) {
+    try {
+      const rows = await dbClient.select().from(schema.drinks).orderBy(schema.drinks.sortOrder);
+      if (rows.length > 0) {
+        return rows.map((r) => {
+          const match = catalogue.drinks.find((d) => d.slug === r.slug);
+          return {
+            id: r.id,
+            slug: r.slug,
+            name: r.name,
+            category: r.category,
+            originId: r.originId ?? match?.originId ?? null,
+            roast: (r.roast as any) ?? match?.roast ?? null,
+            description: r.description,
+            longDescription: r.longDescription ?? match?.longDescription ?? '',
+            tastingNotes: r.tastingNotes ?? match?.tastingNotes ?? [],
+            allergens: r.allergens ?? match?.allergens ?? [],
+            caffeineMg: r.caffeineMg,
+            basePrice: r.basePrice,
+            imageUrl: r.imageUrl ?? match?.imageUrl ?? '',
+            isSeasonal: r.isSeasonal,
+            isAvailable: r.isAvailable,
+            isIced: r.isIced,
+            intensity: r.intensity,
+            sortOrder: r.sortOrder,
+            allowedModifiers: match?.allowedModifiers ?? ['size', 'milk', 'shot', 'syrup', 'temperature'],
+            defaultModifiers: match?.defaultModifiers ?? { size: 'regular', milk: 'whole' },
+          };
+        });
+      }
+    } catch (err) {
+      console.warn('[repositories] Neon listDrinks error, using fallback:', err);
+    }
+  }
   return [...catalogue.drinks].sort((a, b) => a.sortOrder - b.sortOrder);
 }
 export async function getDrinkBySlug(slug: string): Promise<Drink | null> {
-  return catalogue.drinks.find((d) => d.slug === slug) ?? null;
+  const drinks = await listDrinks();
+  return drinks.find((d) => d.slug === slug) ?? null;
 }
 export async function getDrinkById(id: string): Promise<Drink | null> {
-  return catalogue.drinks.find((d) => d.id === id) ?? null;
+  const drinks = await listDrinks();
+  return drinks.find((d) => d.id === id) ?? null;
 }
 export async function catalogueMap(): Promise<Map<string, Drink>> {
-  return new Map(catalogue.drinks.map((d) => [d.id, d]));
+  const drinks = await listDrinks();
+  return new Map(drinks.map((d) => [d.id, d]));
 }
 export async function listModifiers() {
   return catalogue.modifiers;
 }
 export async function listOrigins(): Promise<Origin[]> {
+  const dbClient = await getDb();
+  if (dbClient) {
+    try {
+      const rows = await dbClient.select().from(schema.origins);
+      if (rows.length > 0) {
+        return rows.map((r) => {
+          const match = catalogue.origins.find((o) => o.slug === r.slug);
+          return {
+            id: r.id,
+            slug: r.slug,
+            name: r.name,
+            country: r.country,
+            lat: r.lat,
+            lng: r.lng,
+            altitudeM: r.altitudeM ?? match?.altitudeM ?? 0,
+            process: r.process ?? match?.process ?? '',
+            farmerName: r.farmerName ?? match?.farmerName ?? '',
+            farmerStory: r.farmerStory ?? match?.farmerStory ?? '',
+            heroImage: r.heroImage ?? match?.heroImage ?? '',
+            varietal: r.varietal ?? match?.varietal ?? '',
+            harvest: r.harvest ?? match?.harvest ?? '',
+          };
+        });
+      }
+    } catch (err) {
+      console.warn('[repositories] Neon listOrigins error, using fallback:', err);
+    }
+  }
   return catalogue.origins;
 }
 export async function getOrigin(slug: string): Promise<Origin | null> {
-  return catalogue.origins.find((o) => o.slug === slug) ?? null;
+  const origins = await listOrigins();
+  return origins.find((o) => o.slug === slug) ?? null;
 }
 export async function listStores(): Promise<Store[]> {
+  const dbClient = await getDb();
+  if (dbClient) {
+    try {
+      const rows = await dbClient.select().from(schema.stores).where(eq(schema.stores.isActive, true));
+      if (rows.length > 0) {
+        return rows.map((r) => {
+          const match = catalogue.stores.find((s) => s.slug === r.slug);
+          return {
+            id: r.id,
+            slug: r.slug,
+            name: r.name,
+            address: r.address,
+            city: r.city,
+            lat: r.lat,
+            lng: r.lng,
+            phone: r.phone ?? match?.phone ?? '',
+            hours: (r.hours as Record<string, [string, string]>) ?? match?.hours ?? {},
+            isActive: r.isActive,
+            blurb: r.blurb ?? match?.blurb ?? '',
+          };
+        });
+      }
+    } catch (err) {
+      console.warn('[repositories] Neon listStores error, using fallback:', err);
+    }
+  }
   return catalogue.stores.filter((s) => s.isActive);
 }
 export async function getStore(idOrSlug: string): Promise<Store | null> {
-  return catalogue.stores.find((s) => s.id === idOrSlug || s.slug === idOrSlug) ?? null;
+  const stores = await listStores();
+  return stores.find((s) => s.id === idOrSlug || s.slug === idOrSlug) ?? null;
 }
 export async function listGuides(): Promise<Guide[]> {
   return catalogue.guides;

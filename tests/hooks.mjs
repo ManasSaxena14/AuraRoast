@@ -9,14 +9,15 @@
  * Everything else — type stripping — Node does natively.
  */
 import { registerHooks } from 'node:module';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const SRC = new URL('../src/', import.meta.url);
 const CANDIDATES = ['.ts', '.tsx', '/index.ts'];
 
 function probe(url) {
-  if (existsSync(fileURLToPath(url))) return url;
+  const p = fileURLToPath(url);
+  if (existsSync(p) && !statSync(p).isDirectory()) return url;
   for (const ext of CANDIDATES) {
     const candidate = new URL(url.href + ext);
     if (existsSync(fileURLToPath(candidate))) return candidate;
@@ -30,7 +31,11 @@ registerHooks({
 
     if (specifier.startsWith('@/')) {
       base = new URL(specifier.slice(2), SRC);
-    } else if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) {
+    } else if (
+      specifier.startsWith('.') &&
+      context.parentURL?.startsWith('file:') &&
+      !context.parentURL.includes('/node_modules/')
+    ) {
       base = new URL(specifier, context.parentURL);
     }
 

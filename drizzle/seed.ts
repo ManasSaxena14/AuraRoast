@@ -13,6 +13,9 @@ import { ORIGINS } from '../src/data/origins';
 import { STORES } from '../src/data/stores';
 import { TIERS } from '../src/domain/loyalty';
 import { slotTimesForDay, toDateKey } from '../src/domain/slots';
+try {
+  process.loadEnvFile('.env.local');
+} catch {}
 
 async function main() {
   const url = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
@@ -118,6 +121,39 @@ async function main() {
       })),
     )
     .onConflictDoNothing({ target: schema.guides.slug });
+
+  const insertedOrigins = await db
+    .select({ id: schema.origins.id, slug: schema.origins.slug })
+    .from(schema.origins);
+  const originMap = new Map(insertedOrigins.map((o) => [o.slug, o.id]));
+
+  await db
+    .insert(schema.drinks)
+    .values(
+      DRINKS.map((d) => {
+        const originSlug = d.originId ? d.originId.replace(/^org-/, '') : null;
+        return {
+          slug: d.slug,
+          name: d.name,
+          category: d.category,
+          originId: originSlug ? (originMap.get(originSlug) ?? null) : null,
+          roast: d.roast,
+          description: d.description,
+          longDescription: d.longDescription,
+          tastingNotes: d.tastingNotes,
+          allergens: d.allergens,
+          caffeineMg: d.caffeineMg,
+          basePrice: d.basePrice,
+          imageUrl: d.imageUrl,
+          isSeasonal: d.isSeasonal,
+          isAvailable: d.isAvailable,
+          isIced: d.isIced,
+          intensity: d.intensity,
+          sortOrder: d.sortOrder,
+        };
+      }),
+    )
+    .onConflictDoNothing({ target: schema.drinks.slug });
 
   console.log('Seed complete — re-running changes nothing.');
 }

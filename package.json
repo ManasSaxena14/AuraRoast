@@ -15,7 +15,7 @@
     "test:all": "npm run test && npm run test:concurrency && npm run motion:lint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:seed": "tsx drizzle/seed.ts",
+    "db:seed": "node --experimental-strip-types --import ./tests/hooks.mjs drizzle/seed.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
