@@ -19,7 +19,7 @@ import {
 import { priceCart, findPromo, buildModifierIndex } from '@/domain/pricing';
 import type { CartLine, Drink, Modifier, PricedCart, SelectedModifier } from '@/domain/types';
 
-const STORAGE_KEY = 'aura-toast.cart.v2';
+const STORAGE_KEY = 'aura-toast.cart.v3';
 
 interface CartContextValue {
   lines: CartLine[];

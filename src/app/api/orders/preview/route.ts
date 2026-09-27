@@ -19,7 +19,7 @@ const bodySchema = z.object({
         drinkId: z.string().min(1),
         slug: z.string().max(120).default(''),
         name: z.string().max(200).default(''),
-        imageUrl: z.string().max(500).default(''),
+        imageUrl: z.string().max(2000).default(''),
         quantity: z.number().int().min(1).max(MAX_LINE_QUANTITY),
         modifiers: z
           .array(
