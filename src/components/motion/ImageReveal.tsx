@@ -47,6 +47,12 @@ export function ImageReveal({
         const tl = gsap.timeline({
           scrollTrigger: { trigger: root, start: 'top 85%', once: true },
           delay,
+          onComplete: () => {
+            tl.scrollTrigger?.kill();
+            tl.kill();
+            gsap.set(root, { clearProps: 'clipPath' });
+            if (!drift) gsap.set(inner, { clearProps: 'scale,transform' });
+          },
         });
         tl.fromTo(
           root,

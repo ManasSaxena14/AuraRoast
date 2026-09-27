@@ -32,29 +32,32 @@ export function DrinkRail({ drinks }: { drinks: Drink[] }) {
               duration: 0.72,
               ease: EASE.aura,
               stagger: { each: 0.04, amount: Math.min(targets.length * 0.04, 0.3) },
+              onComplete: () => {
+                gsap.set(targets, { clearProps: 'opacity,y' });
+              },
             }),
         });
 
-        // The card crossing centre lifts very slightly. Transform only.
-        const centres = cards.map((card) =>
-          gsap.to(card, {
-            scale: 1.02,
-            ease: 'none',
+        // The card crossing centre lifts very slightly, then settles back.
+        const centres = cards.map((card) => {
+          const tl = gsap.timeline({
             scrollTrigger: {
               trigger: card,
-              start: 'top 65%',
-              end: 'bottom 35%',
-              scrub: true,
-              toggleActions: 'play reverse play reverse',
+              start: 'top 80%',
+              end: 'bottom 20%',
+              scrub: 0.3,
             },
-          }),
-        );
+          });
+          tl.to(card, { scale: 1.02, ease: 'sine.inOut', duration: 0.5 })
+            .to(card, { scale: 1, ease: 'sine.inOut', duration: 0.5 });
+          return tl;
+        });
 
         return () => {
           batch.forEach((t) => t.kill());
-          centres.forEach((t) => {
-            t.scrollTrigger?.kill();
-            t.kill();
+          centres.forEach((tl) => {
+            tl.scrollTrigger?.kill();
+            tl.kill();
           });
           gsap.set(cards, { clearProps: 'all' });
         };
