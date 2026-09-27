@@ -97,7 +97,43 @@ export function CartProvider({
     }
   }, [lines, fulfillment, promoCode, tip, hydrated]);
 
-  const catalogueMap = useMemo(() => new Map(catalogue.map((d) => [d.id, d])), [catalogue]);
+  const catalogueMap = useMemo(() => {
+    const map = new Map<string, Drink>(catalogue.map((d) => [d.id, d]));
+    for (const d of catalogue) {
+      map.set(d.slug, d);
+    }
+    // Lazy import or static data inclusion of pairings for instant client-side pricing
+    import('@/data/pairings').then(({ PAIRINGS }) => {
+      for (const p of PAIRINGS) {
+        const item: Drink = {
+          id: p.id,
+          slug: p.slug,
+          name: p.name,
+          category: 'pairings',
+          originId: null,
+          roast: null,
+          description: p.description,
+          longDescription: p.pairingNote,
+          tastingNotes: [],
+          allergens: p.allergens,
+          caffeineMg: 0,
+          basePrice: p.price,
+          imageUrl: p.imageUrl,
+          isSeasonal: false,
+          isAvailable: p.isAvailable,
+          isIced: false,
+          intensity: 0,
+          sortOrder: 200 + p.sortOrder,
+          allowedModifiers: [],
+          defaultModifiers: {},
+        };
+        map.set(p.id, item);
+        map.set(p.slug, item);
+        map.set(`pairing-${p.id}`, item);
+      }
+    });
+    return map;
+  }, [catalogue]);
   const modifierIndex = useMemo(() => buildModifierIndex(modifiers), [modifiers]);
 
   const priced = useMemo(

@@ -173,10 +173,15 @@ function Rail({ p }: { p: Pairing }) {
   );
 }
 
+import { PairingAddButton } from '@/components/pairings/PairingAddButton';
+
 function Meta({ p }: { p: Pairing }) {
   return (
-    <div className="pairing__meta">
-      <p className="pairing__price mono">{formatMoney(p.price)}</p>
+    <div className="pairing__meta" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+      <div className="row-between" style={{ alignItems: 'baseline', gap: 'var(--space-3)', width: '100%' }}>
+        <p className="pairing__price mono">{formatMoney(p.price)}</p>
+        <PairingAddButton pairing={p} />
+      </div>
       <p className="pairing__allergens mono">
         {p.allergens.length ? p.allergens.join(' · ') : 'no listed allergens'}
       </p>

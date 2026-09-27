@@ -146,24 +146,68 @@ export function Barista({ drinks, modifiers }: { drinks: Drink[]; modifiers: Mod
         className="barista-launcher"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        aria-label={open ? 'Close the barista' : 'Ask the barista'}
+        aria-label={open ? 'Close the AI barista' : 'Ask the AI barista'}
       >
         <Halo size={54} stroke={1.5} progress={open ? 1 : 0.72} animateOnMount={false} />
-        <span className="barista-launcher__glyph" aria-hidden="true">
-          {open ? '✕' : '◍'}
+        <span className="barista-launcher__glyph" aria-hidden="true" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {open ? (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          ) : (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="6" width="18" height="14" rx="4" />
+              <circle cx="8.5" cy="12" r="1.5" fill="currentColor" />
+              <circle cx="15.5" cy="12" r="1.5" fill="currentColor" />
+              <path d="M10 16h4" strokeWidth="2" />
+              <path d="M12 2v4" />
+              <circle cx="12" cy="2" r="1" fill="currentColor" />
+            </svg>
+          )}
         </span>
       </button>
 
       {open ? (
         <section ref={panelRef} className="barista" role="dialog" aria-modal="true" aria-label="AI Barista">
-          <header className="barista__head row-between">
-            <div>
-              <p className="eyebrow" style={{ marginBottom: 4 }}>
-                The bar
-              </p>
-              <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-                Real tool calls into the live menu — not a scripted demo.
-              </p>
+          <header className="barista__head row-between" style={{ padding: 'var(--space-4) var(--space-5)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: '50%',
+                  background: 'rgb(242 206 147 / 0.15)',
+                  display: 'grid',
+                  placeItems: 'center',
+                  color: 'var(--aura-500)',
+                  border: '1px solid rgb(242 206 147 / 0.3)',
+                  boxShadow: '0 0 12px rgb(242 206 147 / 0.2)',
+                  flexShrink: 0,
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="6" width="18" height="14" rx="4" />
+                  <circle cx="8.5" cy="12" r="1.5" fill="currentColor" />
+                  <circle cx="15.5" cy="12" r="1.5" fill="currentColor" />
+                  <path d="M10 16h4" strokeWidth="2" />
+                  <path d="M12 2v4" />
+                  <circle cx="12" cy="2" r="1" fill="currentColor" />
+                </svg>
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <p className="eyebrow" style={{ marginBottom: 0, color: 'var(--aura-400)', fontWeight: 600 }}>
+                    AI Barista
+                  </p>
+                  <span style={{ fontSize: 10, background: 'rgb(46 160 67 / 0.2)', color: '#56d364', padding: '1px 6px', borderRadius: 99, fontWeight: 600 }}>
+                    ● Online
+                  </span>
+                </div>
+                <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 2 }}>
+                  Live menu recommendations & order intelligence.
+                </p>
+              </div>
             </div>
             <button className="btn btn--ghost btn--sm" onClick={() => setOpen(false)} aria-label="Close">
               ✕

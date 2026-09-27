@@ -88,16 +88,49 @@ export async function listDrinks(): Promise<Drink[]> {
   return [...catalogue.drinks].sort((a, b) => a.sortOrder - b.sortOrder);
 }
 export async function getDrinkBySlug(slug: string): Promise<Drink | null> {
-  const drinks = await listDrinks();
-  return drinks.find((d) => d.slug === slug) ?? null;
+  const map = await catalogueMap();
+  return map.get(slug) ?? null;
 }
 export async function getDrinkById(id: string): Promise<Drink | null> {
-  const drinks = await listDrinks();
-  return drinks.find((d) => d.id === id) ?? null;
+  const map = await catalogueMap();
+  return map.get(id) ?? null;
 }
 export async function catalogueMap(): Promise<Map<string, Drink>> {
+  const { PAIRINGS } = await import('@/data/pairings');
   const drinks = await listDrinks();
-  return new Map(drinks.map((d) => [d.id, d]));
+  const map = new Map<string, Drink>();
+  for (const d of drinks) {
+    map.set(d.id, d);
+    map.set(d.slug, d);
+  }
+  for (const p of PAIRINGS) {
+    const item: Drink = {
+      id: p.id,
+      slug: p.slug,
+      name: p.name,
+      category: 'pairings',
+      originId: null,
+      roast: null,
+      description: p.description,
+      longDescription: p.pairingNote,
+      tastingNotes: [],
+      allergens: p.allergens,
+      caffeineMg: 0,
+      basePrice: p.price,
+      imageUrl: p.imageUrl,
+      isSeasonal: false,
+      isAvailable: p.isAvailable,
+      isIced: false,
+      intensity: 0,
+      sortOrder: 200 + p.sortOrder,
+      allowedModifiers: [],
+      defaultModifiers: {},
+    };
+    map.set(p.id, item);
+    map.set(p.slug, item);
+    map.set(`pairing-${p.id}`, item);
+  }
+  return map;
 }
 export async function listModifiers() {
   return catalogue.modifiers;
