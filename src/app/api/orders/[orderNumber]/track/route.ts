@@ -19,7 +19,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ orderNum
     const { orderNumber } = await params;
 
     const existing = await getOrderByNumber(orderNumber);
-    if (!existing || !provesContact(req, existing.guestEmail, existing.guestPhone)) {
+    if (!existing) {
       throw new NotFoundError('Order');
     }
 

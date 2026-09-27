@@ -330,6 +330,20 @@ export function Tracker({
             </Button>
           ) : null}
 
+          {order.fulfillment === 'delivery' && (order.addressLine || data?.destination) ? (
+            <div className="card stack-sm" style={{ background: 'var(--roast-800)', border: 'var(--hairline)', padding: 'var(--space-4)' }}>
+              <p className="eyebrow" style={{ fontSize: 10, letterSpacing: '0.08em' }}>Delivery Destination</p>
+              <p style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}>
+                {order.addressLine || 'Pinned location on map'}
+              </p>
+              {order.guestName ? (
+                <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                  Recipient: {order.guestName} {order.guestPhone ? `· ${order.guestPhone}` : ''}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
           <Reveal variant="rise" className="card receipt" style={{ maxWidth: 'none' }}>
             <p className="eyebrow" style={{ marginBottom: 'var(--space-4)' }}>
               Receipt

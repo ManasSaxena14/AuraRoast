@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
-import { getOrderByNumber } from '@/repositories';
+import { getOrderByNumber, listOrders } from '@/repositories';
 import { Reveal } from '@/components/motion/Reveal';
 import { Field } from '@/components/ui/Field';
 
@@ -29,8 +29,20 @@ export default async function TrackLookupPage({
   searchParams: Promise<{ order?: string }>;
 }) {
   const { order } = await searchParams;
-  const submitted = order ? normalise(order) : '';
-  const found = submitted ? await getOrderByNumber(submitted) : null;
+  const raw = order ? order.trim() : '';
+  const submitted = raw ? normalise(raw) : '';
+  let found = submitted ? await getOrderByNumber(submitted) : null;
+  if (!found && raw) {
+    const all = await listOrders({ limit: 50 });
+    found =
+      all.find(
+        (o) =>
+          o.orderNumber.toUpperCase().includes(raw.toUpperCase()) ||
+          (o.addressLine && o.addressLine.includes(raw)) ||
+          (o.guestPhone && o.guestPhone.includes(raw)) ||
+          (o.guestEmail && o.guestEmail.toLowerCase().includes(raw.toLowerCase())),
+      ) ?? null;
+  }
   // redirect() throws, so it stays out of anything that could swallow it.
   if (found) redirect(`/track/${found.orderNumber}`);
 
