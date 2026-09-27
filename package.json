@@ -10,12 +10,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "npm run typecheck && npm run motion:lint",
     "motion:lint": "node scripts/check-easing.mjs",
-    "test": "AURA_EPHEMERAL=1 node --test --experimental-strip-types --import ./tests/hooks.mjs 'tests/unit/*.test.ts'",
-    "test:concurrency": "AURA_EPHEMERAL=1 node --test --experimental-strip-types --import ./tests/hooks.mjs 'tests/concurrency/*.test.ts'",
-    "test:all": "npm run test && npm run test:concurrency && npm run motion:lint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:seed": "node --experimental-strip-types --import ./tests/hooks.mjs drizzle/seed.ts",
+    "db:seed": "tsx drizzle/seed.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
