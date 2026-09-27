@@ -95,14 +95,23 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
     if (!hydrated || lines.length === 0) return;
     let cancelled = false;
     (async () => {
-      const res = await fetch('/api/orders/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lines, fulfillment, tip, promoCode }),
-      });
-      if (!res.ok) return;
-      const data = (await res.json()) as PricedCart;
-      if (!cancelled) setServer(data);
+      try {
+        const res = await fetch('/api/orders/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lines,
+            fulfillment: fulfillment || 'delivery',
+            tip: typeof tip === 'number' ? tip : 0,
+            promoCode: promoCode || null,
+          }),
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as PricedCart;
+        if (!cancelled) setServer(data);
+      } catch {
+        /* fallback to client priced total if network error */
+      }
     })();
     return () => {
       cancelled = true;

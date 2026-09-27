@@ -78,40 +78,40 @@ const inputSchema = z.object({
   lines: z
     .array(
       z.object({
-        lineId: z.string().max(64).default(''),
-        drinkId: z.string().min(1),
-        slug: z.string().max(120).default(''),
-        name: z.string().max(200).default(''),
-        imageUrl: z.string().max(2000).default(''),
-        quantity: z.number().int().min(1).max(MAX_LINE_QUANTITY),
+        lineId: z.string().default(''),
+        drinkId: z.string().min(1).max(500),
+        slug: z.string().max(500).default(''),
+        name: z.string().max(500).default(''),
+        imageUrl: z.string().default(''),
+        quantity: z.coerce.number().int().min(1).max(MAX_LINE_QUANTITY),
         modifiers: z
           .array(
             z.object({
-              kind: z.enum(['size', 'milk', 'syrup', 'shot', 'temperature']),
-              slug: z.string().min(1).max(64),
-              label: z.string().max(160).default(''),
+              kind: z.string().max(100),
+              slug: z.string().max(200),
+              label: z.string().max(500).default(''),
               priceDelta: z.number().default(0),
               caffeineDelta: z.number().default(0),
             }),
           )
-          .max(20)
+          .max(50)
           .default([]),
       }),
     )
-    .max(50)
+    .max(100)
     .default([]),
-  fulfillment: z.enum(['delivery', 'pickup']),
-  paymentMethod: z.enum(['cash', 'upi']),
-  storeId: z.string().max(64).default(''),
-  guestName: z.string().max(120).default(''),
-  guestEmail: z.string().max(200).default(''),
-  guestPhone: z.string().max(32).nullish(),
-  addressLine: z.string().max(400).nullish(),
+  fulfillment: z.enum(['delivery', 'pickup']).default('delivery'),
+  paymentMethod: z.enum(['cash', 'upi']).default('cash'),
+  storeId: z.string().max(200).default(''),
+  guestName: z.string().max(200).default(''),
+  guestEmail: z.string().max(300).default(''),
+  guestPhone: z.string().max(100).nullish(),
+  addressLine: z.string().max(1000).nullish(),
   deliveryLat: z.number().min(-90).max(90).nullish(),
   deliveryLng: z.number().min(-180).max(180).nullish(),
-  tip: z.number().int().min(0).max(1_000_000).optional(),
-  promoCode: z.string().max(32).nullish(),
-  userId: z.string().max(64).nullish(),
+  tip: z.coerce.number().min(0).max(10_000_000).nullish(),
+  promoCode: z.string().max(100).nullish(),
+  userId: z.string().max(200).nullish(),
   clientClaimedTotal: z.number().optional(),
 });
 
@@ -125,7 +125,7 @@ export async function placeOrder(
   if (!parsed.success) {
     throw new DomainError('That order could not be read.', 'invalid_body', 400, parsed.error.issues);
   }
-  const input: PlaceOrderInput = parsed.data;
+  const input: PlaceOrderInput = parsed.data as unknown as PlaceOrderInput;
 
   if (!input.lines.length) throw new DomainError('Your cart is empty.', 'empty_cart', 400);
   if (!input.guestEmail.includes('@')) {
