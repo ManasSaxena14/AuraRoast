@@ -15,8 +15,12 @@ export default async function ConfirmationPage({
   const { order: orderNumber } = await searchParams;
   if (!orderNumber) redirect('/menu');
 
-  const order = await getOrderByNumber(orderNumber);
-  if (!order) redirect('/menu');
+  let order = await getOrderByNumber(orderNumber);
+  if (!order) {
+    await new Promise((r) => setTimeout(r, 600));
+    order = await getOrderByNumber(orderNumber);
+  }
+  if (!order) redirect(`/track/${orderNumber}`);
 
   let qrSvg: string | null = null;
   let upi: { uri: string; upiId: string; payeeName: string } | null = null;

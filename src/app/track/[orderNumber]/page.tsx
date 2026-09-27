@@ -21,7 +21,11 @@ export default async function TrackPage({
   params: Promise<{ orderNumber: string }>;
 }) {
   const { orderNumber } = await params;
-  const order = await getOrderByNumber(orderNumber);
+  let order = await getOrderByNumber(orderNumber);
+  if (!order) {
+    await new Promise((r) => setTimeout(r, 600));
+    order = await getOrderByNumber(orderNumber);
+  }
   if (!order) notFound();
 
   // Derived here, not left to the client's first poll: nothing ever advances

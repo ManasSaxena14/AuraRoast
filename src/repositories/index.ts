@@ -200,27 +200,239 @@ export async function searchDrinks(q: string): Promise<Drink[]> {
     .map((r) => r.d);
 }
 
+function safeUuid(val: string | null | undefined): string | null {
+  if (!val) return null;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(val) ? val : null;
+}
+
 /* ── Orders ─────────────────────────────────────────────────────────── */
 export async function insertOrder(order: Omit<Order, 'orderNumber'> & { orderNumber?: string }): Promise<Order> {
   const row: Order = { ...order, orderNumber: order.orderNumber ?? nextOrderNumber() } as Order;
   db.orders.unshift(row);
   commit();
+
+  const dbClient = await getDb();
+  if (dbClient) {
+    try {
+      await dbClient
+        .insert(schema.orders)
+        .values({
+          id: row.id,
+          orderNumber: row.orderNumber,
+          userId: safeUuid(row.userId),
+          guestName: row.guestName,
+          guestEmail: row.guestEmail,
+          guestPhone: row.guestPhone,
+          storeId: safeUuid(row.storeId),
+          fulfillment: row.fulfillment,
+          addressLine: row.addressLine,
+          deliveryLat: row.deliveryLat,
+          deliveryLng: row.deliveryLng,
+          subtotal: row.subtotal,
+          tax: row.tax,
+          deliveryFee: row.deliveryFee,
+          tip: row.tip,
+          discount: row.discount,
+          total: row.total,
+          currency: row.currency,
+          status: row.status as any,
+          paymentMethod: row.paymentMethod as any,
+          paymentStatus: row.paymentStatus as any,
+          upiTransactionRef: row.upiTransactionRef,
+          deliveryPlan: row.deliveryPlan as any,
+          routeGeometry: row.routeGeometry as any,
+          routeSource: row.routeSource,
+          derivedStage: row.derivedStage as any,
+          placedAt: new Date(row.placedAt),
+          confirmedAt: row.confirmedAt ? new Date(row.confirmedAt) : null,
+          cancelledAt: row.cancelledAt ? new Date(row.cancelledAt) : null,
+        })
+        .onConflictDoUpdate({
+          target: schema.orders.orderNumber,
+          set: {
+            status: row.status as any,
+            paymentStatus: row.paymentStatus as any,
+            upiTransactionRef: row.upiTransactionRef,
+          },
+        });
+
+      if (row.items && row.items.length > 0) {
+        for (const item of row.items) {
+          await dbClient
+            .insert(schema.orderItems)
+            .values({
+              id: item.id,
+              orderId: row.id,
+              drinkId: safeUuid(item.drinkId),
+              nameSnapshot: item.nameSnapshot,
+              unitPrice: item.unitPrice,
+              quantity: item.quantity,
+              modifiers: item.modifiers as any,
+            })
+            .catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.warn('[repositories] Neon insertOrder error:', err);
+    }
+  }
+
   return row;
 }
 
 export async function getOrderByNumber(orderNumber: string): Promise<Order | null> {
-  return db.orders.find((o) => o.orderNumber === orderNumber) ?? null;
+  const mem = db.orders.find((o) => o.orderNumber === orderNumber);
+  if (mem) return mem;
+
+  const dbClient = await getDb();
+  if (dbClient) {
+    try {
+      const [orderRow] = await dbClient
+        .select()
+        .from(schema.orders)
+        .where(eq(schema.orders.orderNumber, orderNumber));
+
+      if (orderRow) {
+        const itemRows = await dbClient
+          .select()
+          .from(schema.orderItems)
+          .where(eq(schema.orderItems.orderId, orderRow.id));
+
+        const order: Order = {
+          id: orderRow.id,
+          orderNumber: orderRow.orderNumber,
+          userId: orderRow.userId,
+          guestName: orderRow.guestName,
+          guestEmail: orderRow.guestEmail,
+          guestPhone: orderRow.guestPhone,
+          storeId: orderRow.storeId,
+          fulfillment: orderRow.fulfillment as any,
+          addressLine: orderRow.addressLine,
+          deliveryLat: orderRow.deliveryLat,
+          deliveryLng: orderRow.deliveryLng,
+          subtotal: orderRow.subtotal,
+          tax: orderRow.tax,
+          deliveryFee: orderRow.deliveryFee,
+          tip: orderRow.tip,
+          discount: orderRow.discount,
+          total: orderRow.total,
+          currency: orderRow.currency,
+          status: orderRow.status as any,
+          paymentMethod: orderRow.paymentMethod as any,
+          paymentStatus: orderRow.paymentStatus as any,
+          upiTransactionRef: orderRow.upiTransactionRef,
+          verifiedAt: orderRow.verifiedAt ? orderRow.verifiedAt.toISOString() : null,
+          deliveryPlan: orderRow.deliveryPlan as any,
+          routeGeometry: orderRow.routeGeometry as any,
+          routeSource: orderRow.routeSource as any,
+          derivedStage: orderRow.derivedStage as any,
+          placedAt: orderRow.placedAt ? orderRow.placedAt.toISOString() : new Date().toISOString(),
+          confirmedAt: orderRow.confirmedAt ? orderRow.confirmedAt.toISOString() : null,
+          cancelledAt: orderRow.cancelledAt ? orderRow.cancelledAt.toISOString() : null,
+          items: itemRows.map((it) => ({
+            id: it.id,
+            drinkId: it.drinkId,
+            nameSnapshot: it.nameSnapshot,
+            unitPrice: it.unitPrice,
+            quantity: it.quantity,
+            modifiers: (it.modifiers as any) ?? [],
+            lineTotal: it.unitPrice * it.quantity,
+          })),
+        };
+        db.orders.unshift(order);
+        return order;
+      }
+    } catch (err) {
+      console.warn('[repositories] Neon getOrderByNumber error:', err);
+    }
+  }
+
+  return null;
 }
 
 export async function updateOrder(orderNumber: string, patch: Partial<Order>): Promise<Order | null> {
   const i = db.orders.findIndex((o) => o.orderNumber === orderNumber);
-  if (i === -1) return null;
-  db.orders[i] = { ...db.orders[i], ...patch };
-  commit();
-  return db.orders[i];
+  if (i !== -1) {
+    db.orders[i] = { ...db.orders[i], ...patch };
+    commit();
+  }
+
+  const dbClient = await getDb();
+  if (dbClient) {
+    try {
+      const updateData: Record<string, unknown> = {};
+      if (patch.status) updateData.status = patch.status;
+      if (patch.paymentStatus) updateData.paymentStatus = patch.paymentStatus;
+      if (patch.upiTransactionRef !== undefined) updateData.upiTransactionRef = patch.upiTransactionRef;
+      if (patch.confirmedAt) updateData.confirmedAt = new Date(patch.confirmedAt);
+      if (patch.cancelledAt) updateData.cancelledAt = new Date(patch.cancelledAt);
+      if (patch.verifiedAt) updateData.verifiedAt = new Date(patch.verifiedAt);
+      if (patch.derivedStage) updateData.derivedStage = patch.derivedStage;
+
+      if (Object.keys(updateData).length > 0) {
+        await dbClient
+          .update(schema.orders)
+          .set(updateData)
+          .where(eq(schema.orders.orderNumber, orderNumber));
+      }
+    } catch (err) {
+      console.warn('[repositories] Neon updateOrder error:', err);
+    }
+  }
+
+  return i !== -1 ? db.orders[i] : null;
 }
 
 export async function listOrders(opts: { userId?: string; limit?: number } = {}): Promise<Order[]> {
+  const dbClient = await getDb();
+  if (dbClient) {
+    try {
+      let query = dbClient.select().from(schema.orders);
+      if (opts.userId && safeUuid(opts.userId)) {
+        query = query.where(eq(schema.orders.userId, opts.userId)) as any;
+      }
+      const rows = await query.limit(opts.limit ?? 50);
+      if (rows.length > 0) {
+        return rows.map((orderRow) => ({
+          id: orderRow.id,
+          orderNumber: orderRow.orderNumber,
+          userId: orderRow.userId,
+          guestName: orderRow.guestName,
+          guestEmail: orderRow.guestEmail,
+          guestPhone: orderRow.guestPhone,
+          storeId: orderRow.storeId,
+          fulfillment: orderRow.fulfillment as any,
+          addressLine: orderRow.addressLine,
+          deliveryLat: orderRow.deliveryLat,
+          deliveryLng: orderRow.deliveryLng,
+          subtotal: orderRow.subtotal,
+          tax: orderRow.tax,
+          deliveryFee: orderRow.deliveryFee,
+          tip: orderRow.tip,
+          discount: orderRow.discount,
+          total: orderRow.total,
+          currency: orderRow.currency,
+          status: orderRow.status as any,
+          paymentMethod: orderRow.paymentMethod as any,
+          paymentStatus: orderRow.paymentStatus as any,
+          upiTransactionRef: orderRow.upiTransactionRef,
+          verifiedAt: orderRow.verifiedAt ? orderRow.verifiedAt.toISOString() : null,
+          deliveryPlan: orderRow.deliveryPlan as any,
+          routeGeometry: orderRow.routeGeometry as any,
+          routeSource: orderRow.routeSource as any,
+          derivedStage: orderRow.derivedStage as any,
+          placedAt: orderRow.placedAt ? orderRow.placedAt.toISOString() : new Date().toISOString(),
+          confirmedAt: orderRow.confirmedAt ? orderRow.confirmedAt.toISOString() : null,
+          cancelledAt: orderRow.cancelledAt ? orderRow.cancelledAt.toISOString() : null,
+          items: [],
+        }));
+      }
+    } catch (err) {
+      console.warn('[repositories] Neon listOrders error:', err);
+    }
+  }
+
   let rows = db.orders;
   if (opts.userId) rows = rows.filter((o) => o.userId === opts.userId);
   return rows.slice(0, opts.limit ?? 50);
@@ -228,6 +440,57 @@ export async function listOrders(opts: { userId?: string; limit?: number } = {})
 
 /** Backed by the partial index `idx_orders_pending_upi` (§4.3). */
 export async function listPendingUpiOrders(): Promise<Order[]> {
+  const dbClient = await getDb();
+  if (dbClient) {
+    try {
+      const rows = await dbClient
+        .select()
+        .from(schema.orders)
+        .where(
+          eq(schema.orders.paymentMethod, 'upi'),
+        );
+      if (rows.length > 0) {
+        return rows
+          .filter((r) => r.paymentStatus === 'pending')
+          .map((orderRow) => ({
+            id: orderRow.id,
+            orderNumber: orderRow.orderNumber,
+            userId: orderRow.userId,
+            guestName: orderRow.guestName,
+            guestEmail: orderRow.guestEmail,
+            guestPhone: orderRow.guestPhone,
+            storeId: orderRow.storeId,
+            fulfillment: orderRow.fulfillment as any,
+            addressLine: orderRow.addressLine,
+            deliveryLat: orderRow.deliveryLat,
+            deliveryLng: orderRow.deliveryLng,
+            subtotal: orderRow.subtotal,
+            tax: orderRow.tax,
+            deliveryFee: orderRow.deliveryFee,
+            tip: orderRow.tip,
+            discount: orderRow.discount,
+            total: orderRow.total,
+            currency: orderRow.currency,
+            status: orderRow.status as any,
+            paymentMethod: orderRow.paymentMethod as any,
+            paymentStatus: orderRow.paymentStatus as any,
+            upiTransactionRef: orderRow.upiTransactionRef,
+            verifiedAt: orderRow.verifiedAt ? orderRow.verifiedAt.toISOString() : null,
+            deliveryPlan: orderRow.deliveryPlan as any,
+            routeGeometry: orderRow.routeGeometry as any,
+            routeSource: orderRow.routeSource as any,
+            derivedStage: orderRow.derivedStage as any,
+            placedAt: orderRow.placedAt ? orderRow.placedAt.toISOString() : new Date().toISOString(),
+            confirmedAt: orderRow.confirmedAt ? orderRow.confirmedAt.toISOString() : null,
+            cancelledAt: orderRow.cancelledAt ? orderRow.cancelledAt.toISOString() : null,
+            items: [],
+          }));
+      }
+    } catch (err) {
+      console.warn('[repositories] Neon listPendingUpiOrders error:', err);
+    }
+  }
+
   return db.orders
     .filter((o) => o.paymentMethod === 'upi' && o.paymentStatus === 'pending')
     .sort((a, b) => b.placedAt.localeCompare(a.placedAt));
