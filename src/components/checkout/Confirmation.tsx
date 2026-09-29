@@ -11,6 +11,7 @@
  * the tracking header, and becomes the live progress ring (§13.4).
  */
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { formatMoney } from '@/domain/money';
 import { Halo } from '@/components/motion/Halo';
@@ -18,6 +19,7 @@ import { Reveal } from '@/components/motion/Reveal';
 import { Button } from '@/components/ui/Button';
 import { Field } from '@/components/ui/Field';
 import { toast } from '@/components/toast/ToastProvider';
+import { contactFor } from '@/lib/device-orders';
 import type { Order } from '@/domain/types';
 
 const REDIRECT_SECONDS = 5;
@@ -26,16 +28,30 @@ export function Confirmation({
   order,
   upi,
   qrSvg,
+  ownedBySession = false,
 }: {
   order: Order;
   upi: { uri: string; upiId: string; payeeName: string } | null;
   qrSvg: string | null;
+  ownedBySession?: boolean;
 }) {
+  const router = useRouter();
+  const cash = order.paymentMethod === 'cash';
   const [drawn, setDrawn] = useState(0);
   const [utr, setUtr] = useState(order.upiTransactionRef ?? '');
   const [saving, setSaving] = useState(false);
+  // The contact typed at checkout, kept by the device that placed the order —
+  // the proof the UTR route asks for. Read after mount (localStorage).
+  const [proof, setProof] = useState<string | null>(null);
+  const [proofInput, setProofInput] = useState('');
+  useEffect(() => setProof(contactFor(order.orderNumber)), [order.orderNumber]);
+  const needsProof = !proof && !ownedBySession;
+
   const [redirectCountdown, setRedirectCountdown] = useState(REDIRECT_SECONDS);
-  const [redirecting, setRedirecting] = useState(false);
+  // A UPI guest has a transfer to make from THIS screen — the QR, the app
+  // link, the UTR box. Whisking them away after five seconds took all of that
+  // with it, so only a cash order (nothing left to do) hands off on its own.
+  const [redirecting, setRedirecting] = useState(!cash);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -43,31 +59,27 @@ export function Confirmation({
     return () => clearTimeout(t);
   }, []);
 
-  /* Auto-redirect countdown after receipt has been visible for ~5 seconds. */
   useEffect(() => {
     if (redirecting) return;
     const id = setInterval(() => {
-      setRedirectCountdown((c) => {
-        if (c <= 1) {
-          clearInterval(id);
-          setRedirecting(true);
-          window.location.href = `/track/${order.orderNumber}`;
-          return 0;
-        }
-        return c - 1;
-      });
+      setRedirectCountdown((c) => Math.max(0, c - 1));
     }, 1000);
     timerRef.current = id;
     return () => clearInterval(id);
-  }, [order.orderNumber, redirecting]);
+  }, [redirecting]);
+
+  // Navigation is a side effect of reaching zero, not something to do from
+  // inside a state updater (which React may run twice).
+  useEffect(() => {
+    if (redirecting || redirectCountdown > 0) return;
+    setRedirecting(true);
+    router.push(`/track/${order.orderNumber}`);
+  }, [redirectCountdown, redirecting, router, order.orderNumber]);
 
   const cancelRedirect = () => {
     if (timerRef.current) clearInterval(timerRef.current);
     setRedirecting(true);
-    setRedirectCountdown(0);
   };
-
-  const cash = order.paymentMethod === 'cash';
 
   return (
     <div className="confirm">
@@ -129,25 +141,28 @@ export function Confirmation({
               Open a UPI app
             </a>
             <form
-              className="row"
-              style={{ gap: 'var(--space-2)' }}
+              className="stack-sm"
               onSubmit={async (e) => {
                 e.preventDefault();
+                const contact = proof ?? (proofInput.trim() || null);
                 setSaving(true);
                 try {
-                  // This used to GET the order, throw the response away and
-                  // claim the reference was noted. It now actually stores it.
                   const res = await fetch(`/api/orders/${order.orderNumber}/utr`, {
                     method: 'PATCH',
                     headers: {
                       'Content-Type': 'application/json',
-                      ...(order.guestEmail ? { 'X-Aura-Contact': order.guestEmail } : {}),
+                      ...(contact ? { 'X-Aura-Contact': contact } : {}),
                     },
-                    body: JSON.stringify({ utr }),
+                    body: JSON.stringify({ utr: utr.trim() }),
                   });
                   const data = await res.json().catch(() => ({}));
                   if (!res.ok) {
-                    toast(data.error ?? 'Could not save that reference.', 'error');
+                    toast(
+                      res.status === 404
+                        ? 'That is not the email or phone this order was placed with.'
+                        : (data.error ?? 'Could not save that reference.'),
+                      'error',
+                    );
                     return;
                   }
                   toast('Reference noted — we will match it against the transfer.', 'success');
@@ -158,16 +173,35 @@ export function Confirmation({
                 }
               }}
             >
-              <Field
-                label="UTR (optional)"
-                value={utr}
-                onChange={(e) => setUtr(e.target.value)}
-                hint="12 digits, from your UPI app"
-                className="stack-sm"
-              />
-              <Button type="submit" size="sm" loading={saving} style={{ alignSelf: 'flex-end' }}>
-                Save
-              </Button>
+              {needsProof ? (
+                <Field
+                  label="Email used at checkout"
+                  type="email"
+                  value={proofInput}
+                  onChange={(e) => setProofInput(e.target.value)}
+                  autoComplete="email"
+                  required
+                />
+              ) : null}
+              <div className="row" style={{ gap: 'var(--space-2)' }}>
+                <Field
+                  label="UTR (optional)"
+                  value={utr}
+                  onChange={(e) => setUtr(e.target.value.replace(/\D/g, '').slice(0, 12))}
+                  inputMode="numeric"
+                  hint="12 digits, from your UPI app"
+                  className="stack-sm"
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  loading={saving}
+                  disabled={utr.length !== 12}
+                  style={{ alignSelf: 'flex-end' }}
+                >
+                  Save
+                </Button>
+              </div>
             </form>
           </div>
         </Reveal>

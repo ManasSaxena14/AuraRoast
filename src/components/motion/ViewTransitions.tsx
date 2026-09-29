@@ -69,13 +69,16 @@ export function ViewTransitions({ children }: { children: React.ReactNode }) {
             resolver.current = resolve;
             startTransition(() => router.push(href));
             // A route that suspends must never leave the page frozen mid-morph.
+            // The screen is frozen for this whole wait, so it is kept short;
+            // the slowest routes (account, admin) commit a loading state at
+            // once and resolve well inside it.
             window.setTimeout(() => {
               if (resolver.current) {
                 resolver.current();
                 resolver.current = null;
                 pending.current = null;
               }
-            }, 700);
+            }, 400);
           }),
       );
 

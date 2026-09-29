@@ -13,12 +13,23 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { formatMoney } from '@/domain/money';
 import { TIERS, type LoyaltyView } from '@/domain/loyalty';
 import { ORDER_STAGE_COPY } from '@/domain/state-machine';
+import { signOutAction } from '@/app/login/actions';
 import { Halo } from '@/components/motion/Halo';
 import { Reveal } from '@/components/motion/Reveal';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/bits';
 import { toast } from '@/components/toast/ToastProvider';
-import type { Order, Subscription, User } from '@/domain/types';
+import type { OrderStatus, Subscription, User } from '@/domain/types';
+
+/** What the orders tab draws — the live stage, derived on the server. */
+export interface AccountOrder {
+  id: string;
+  orderNumber: string;
+  total: number;
+  placedAt: string;
+  stage: OrderStatus;
+  items: { id: string; quantity: number; name: string }[];
+}
 
 const TABS = [
   { id: 'orders', label: 'Orders' },
@@ -34,13 +45,20 @@ export function Account({
   loyalty,
   orders,
   subscriptions: initialSubs,
+  drinkNames,
   initialTab,
+  signedIn,
+  isAdmin,
 }: {
   user: User;
   loyalty: LoyaltyView;
-  orders: Order[];
+  orders: AccountOrder[];
   subscriptions: Subscription[];
+  drinkNames: Record<string, string>;
   initialTab?: string;
+  /** False for the zero-config demo profile, which has nothing to sign out of. */
+  signedIn: boolean;
+  isAdmin: boolean;
 }) {
   const [tab, setTab] = useState<TabId>(
     (TABS.find((t) => t.id === initialTab)?.id ?? 'orders') as TabId,
@@ -81,27 +99,66 @@ export function Account({
     [tab],
   );
 
-  const patchSub = useCallback(async (body: Record<string, unknown>) => {
-    const res = await fetch('/api/subscriptions', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      toast(data.error ?? 'That did not work.', 'error');
-      return;
+  const [pendingSub, setPendingSub] = useState<string | null>(null);
+
+  const patchSub = useCallback(async (body: { id: string } & Record<string, unknown>) => {
+    setPendingSub(body.id);
+    try {
+      const res = await fetch('/api/subscriptions', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast(data.error ?? 'That did not work.', 'error');
+        return;
+      }
+      setSubs((prev) => prev.map((s) => (s.id === data.subscription.id ? data.subscription : s)));
+      toast('Updated.', 'success');
+    } catch {
+      toast('The connection dropped — nothing changed.', 'error');
+    } finally {
+      setPendingSub(null);
     }
-    setSubs((prev) => prev.map((s) => (s.id === data.subscription.id ? data.subscription : s)));
-    toast('Updated.', 'success');
   }, []);
 
   return (
     <div className="shell account">
-      <header className="page-head">
-        <p className="eyebrow">Signed in as</p>
-        <h1>{user.name}</h1>
-        <p className="muted">{user.email}</p>
+      <header className="page-head account__head">
+        <div className="row" style={{ gap: 'var(--space-4)', alignItems: 'center' }}>
+          {user.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={user.image}
+              alt=""
+              width={56}
+              height={56}
+              referrerPolicy="no-referrer"
+              className="account-avatar"
+              style={{ width: 56, height: 56 }}
+            />
+          ) : null}
+          <div className="stack-sm" style={{ gap: 2 }}>
+            <p className="eyebrow">{signedIn ? 'Signed in as' : 'Demo profile'}</p>
+            <h1>{user.name}</h1>
+            <p className="muted">{user.email}</p>
+          </div>
+        </div>
+        <div className="row wrap" style={{ gap: 'var(--space-2)' }}>
+          {isAdmin ? (
+            <Link href="/admin" className="btn btn--outline btn--sm">
+              Back office
+            </Link>
+          ) : null}
+          {signedIn ? (
+            <form action={signOutAction}>
+              <button type="submit" className="btn btn--ghost btn--sm">
+                Sign out
+              </button>
+            </form>
+          ) : null}
+        </div>
       </header>
 
       <div className="tabs" role="tablist" ref={tabsRef} onKeyDown={onTabKeys}>
@@ -153,10 +210,10 @@ export function Account({
                     <span className="mono">{formatMoney(o.total)}</span>
                   </div>
                   <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>
-                    {o.items.map((i) => `${i.quantity} × ${i.nameSnapshot}`).join(', ')}
+                    {o.items.map((i) => `${i.quantity} × ${i.name}`).join(', ')}
                   </p>
                   <p className="mono muted" style={{ fontSize: 11 }}>
-                    {ORDER_STAGE_COPY[o.derivedStage ?? o.status]?.label} ·{' '}
+                    {ORDER_STAGE_COPY[o.stage]?.label} ·{' '}
                     {/* Pinned to IST so the SSR'd day survives hydration. */}
                     {new Date(o.placedAt).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}
                   </p>
@@ -176,9 +233,11 @@ export function Account({
           ) : (
             <Reveal variant="stagger" stagger={0.05} className="stack">
               {subs.map((s) => (
-                <article key={s.id} className="card">
+                <article key={s.id} className="card" aria-busy={pendingSub === s.id || undefined}>
                   <div className="row-between">
-                    <strong>{s.drinkId ? 'Chikmagalur Washed · 250g' : 'Surprise me'}</strong>
+                    <strong>
+                      {s.drinkId ? (drinkNames[s.drinkId] ?? 'Whole bean') : 'Surprise me'} · 250g
+                    </strong>
                     <span className="badge badge--aura">{s.status}</span>
                   </div>
                   <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>
@@ -192,23 +251,39 @@ export function Account({
                       timeZone: 'UTC',
                     })}
                   </p>
-                  <div className="row wrap" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
-                    <Button size="sm" onClick={() => patchSub({ id: s.id, skip: true })}>
-                      Skip next
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() =>
-                        patchSub({ id: s.id, status: s.status === 'active' ? 'paused' : 'active' })
-                      }
-                    >
-                      {s.status === 'active' ? 'Pause' : 'Resume'}
-                    </Button>
-                    <Button size="sm" variant="danger" onClick={() => patchSub({ id: s.id, status: 'cancelled' })}>
-                      Cancel
-                    </Button>
-                  </div>
+                  {s.status !== 'cancelled' ? (
+                    <div className="row wrap" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
+                      <Button
+                        size="sm"
+                        disabled={pendingSub === s.id || s.status !== 'active'}
+                        onClick={() => patchSub({ id: s.id, skip: true })}
+                      >
+                        Skip next
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={pendingSub === s.id}
+                        onClick={() =>
+                          patchSub({ id: s.id, status: s.status === 'active' ? 'paused' : 'active' })
+                        }
+                      >
+                        {s.status === 'active' ? 'Pause' : 'Resume'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={pendingSub === s.id}
+                        onClick={() => {
+                          if (window.confirm('Cancel this subscription? This cannot be undone.')) {
+                            void patchSub({ id: s.id, status: 'cancelled' });
+                          }
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </Reveal>

@@ -78,13 +78,17 @@
   will-change: transform, opacity;
 }
 
-/* ── Ambient steam canvas — not rendered at all under reduced motion ──── */
+/* ── Ambient steam canvas — not rendered at all under reduced motion ────
+   No `mix-blend-mode: screen`: the canvas already composites its particles
+   additively, and a blend mode on a full-hero layer that repaints every frame
+   forced the whole hero stack to be re-blended with it. */
 .steam-canvas {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   opacity: 0.5;
-  mix-blend-mode: screen;
 }
 
 /* ── Parallax layers are always transform, capped at 15% (§14.7 rule 5) ─
@@ -281,10 +285,10 @@
 }
 
 /* ── Velocity skew targets ────────────────────────────────────────── */
-/* No `will-change` here: ScrollSkew sets it alongside the transform and drops
-   both at rest (§16.3). Declared statically it would promote every section for
-   the life of the page, including under reduced motion where the skew never
-   runs at all. */
+/* No `will-change` here: ScrollSkew promotes the sections itself, once, and
+   only on desktop pointers with motion allowed (§16.3). Declared statically it
+   would promote every section on phones and under reduced motion too, where
+   the skew never runs at all. */
 [data-skew] {
   transform-origin: center center;
 }

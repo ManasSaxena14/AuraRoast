@@ -13,6 +13,7 @@ import { availability } from './reservation';
 import { trackOrder } from './order';
 import { listStores } from '@/repositories';
 import { toDateKey } from '@/domain/slots';
+import { ORDER_NUMBER_PATTERN, normaliseOrderNumber } from '@/lib/ids';
 import type { Drink } from '@/domain/types';
 
 export interface ChatMessage {
@@ -76,7 +77,7 @@ const TOOLS = [
     type: 'function' as const,
     function: {
       name: 'check_order',
-      description: 'Look up the live status of an order by its order number, e.g. AT-001042.',
+      description: 'Look up the live status of an order by its order number, e.g. AT-7K3M9Q.',
       parameters: {
         type: 'object',
         properties: { orderNumber: { type: 'string' } },
@@ -141,7 +142,7 @@ async function runTool(name: string, args: Record<string, unknown>) {
     }
     case 'check_order': {
       try {
-        const { order, state } = await trackOrder(String(args.orderNumber ?? ''));
+        const { order, state } = await trackOrder(normaliseOrderNumber(String(args.orderNumber ?? '')));
         return {
           orderNumber: order.orderNumber,
           stage: state.currentStage,
@@ -281,12 +282,13 @@ export async function askBarista(history: ChatMessage[], userText: string): Prom
 async function localBarista(userText: string, toolsUsed: string[]): Promise<BaristaReply> {
   const q = userText.toLowerCase();
 
-  const orderMatch = userText.match(/AT-\d{6}/i);
+  const orderMatch = userText.match(ORDER_NUMBER_PATTERN);
   if (orderMatch) {
     toolsUsed.push('check_order');
-    const r = (await runTool('check_order', { orderNumber: orderMatch[0].toUpperCase() })) as Record<string, unknown>;
+    const wanted = normaliseOrderNumber(orderMatch[0]);
+    const r = (await runTool('check_order', { orderNumber: wanted })) as Record<string, unknown>;
     if (r.error) {
-      return { reply: `I cannot find ${orderMatch[0].toUpperCase()}. Check the number on your receipt.`, action: null, toolsUsed, source: 'local' };
+      return { reply: `I cannot find ${wanted}. Check the number on your receipt.`, action: null, toolsUsed, source: 'local' };
     }
     return {
       reply: `${r.orderNumber} is ${String(r.stage).replace(/_/g, ' ')}${r.etaMinutes ? `, about ${r.etaMinutes} minutes out` : ''}. ${r.total} total.`,

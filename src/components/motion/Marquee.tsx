@@ -8,6 +8,11 @@
  * person, not just running.
  *
  * Velocity is normalised and clamped, so a flick of the wheel cannot launch it.
+ *
+ * Per frame it does one thing: write a transform. The loop width is measured
+ * when the track resizes, never inside the tick (reading `scrollWidth` there
+ * forced a synchronous layout on every frame), and the tick is detached
+ * entirely while the band is off screen or the tab is hidden.
  */
 import { useRef, type ReactNode } from 'react';
 import { ScrollTrigger, gsap, useGSAP } from './gsap';
@@ -36,34 +41,57 @@ export function Marquee({
       const mm = gsap.matchMedia();
 
       mm.add('(prefers-reduced-motion: no-preference)', () => {
-        const half = () => track.scrollWidth / 2;
+        const setX = gsap.quickSetter(track, 'x', 'px') as (value: number) => void;
+        let half = track.scrollWidth / 2;
         let offset = 0;
         let direction = reverse ? -1 : 1;
         let boost = 1;
+        let running = false;
+        let visible = false;
+
+        const ro = new ResizeObserver(() => {
+          half = track.scrollWidth / 2;
+        });
+        ro.observe(track);
 
         const tick = (_t: number, deltaMs: number) => {
-          offset -= (deltaMs / 1000) * speed * direction * boost;
-          const width = half();
-          if (width > 0) offset = ((offset % width) + width) % width;
-          gsap.set(track, { x: -offset, force3D: true });
+          offset -= (Math.min(deltaMs, 64) / 1000) * speed * direction * boost;
+          if (half > 0) offset = ((offset % half) + half) % half;
+          setX(-offset);
           // Ease the boost back down so it decays instead of snapping.
           boost += (1 - boost) * 0.06;
         };
 
-        gsap.ticker.add(tick);
+        const sync = () => {
+          const should = visible && !document.hidden;
+          if (should && !running) gsap.ticker.add(tick);
+          if (!should && running) gsap.ticker.remove(tick);
+          running = should;
+        };
 
         const st = ScrollTrigger.create({
           trigger: root,
           start: 'top bottom',
           end: 'bottom top',
+          onToggle: (self) => {
+            visible = self.isActive;
+            sync();
+          },
           onUpdate: (self) => {
             direction = self.direction === -1 ? (reverse ? 1 : -1) : reverse ? -1 : 1;
             boost = Math.min(9, 1 + Math.abs(self.getVelocity()) / 260);
           },
         });
+        visible = st.isActive;
+        sync();
+
+        document.addEventListener('visibilitychange', sync);
 
         return () => {
-          gsap.ticker.remove(tick);
+          document.removeEventListener('visibilitychange', sync);
+          if (running) gsap.ticker.remove(tick);
+          running = false;
+          ro.disconnect();
           st.kill();
           gsap.set(track, { clearProps: 'transform' });
         };

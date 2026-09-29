@@ -1,12 +1,16 @@
 import { placeOrder } from '@/services/order';
-import { fail, ok, rateLimit } from '@/lib/http';
-import { DomainError, MissingIdempotencyKeyError } from '@/domain/errors';
+import { fail, ok, rateLimit, readJson } from '@/lib/http';
+import { getViewer } from '@/lib/session';
+import { MissingIdempotencyKeyError } from '@/domain/errors';
 
 export const runtime = 'nodejs';
 
 /**
  * Place an order. REQUIRES an `Idempotency-Key` header (§9.3) — a request
  * without one is rejected, not quietly accepted.
+ *
+ * A signed-in guest's order is attached to their account from the SESSION;
+ * nothing in the body can name an account.
  */
 export async function POST(req: Request) {
   const limited = await rateLimit(req, 'orders', 12, 60_000);
@@ -16,16 +20,8 @@ export async function POST(req: Request) {
     const key = req.headers.get('Idempotency-Key');
     if (!key) throw new MissingIdempotencyKeyError();
 
-    // A non-JSON body throws a SyntaxError here, which `fail` cannot classify
-    // and reports as a 500. An unreadable request is a 400.
-    let body: unknown;
-    try {
-      body = await req.json();
-    } catch {
-      throw new DomainError('Malformed JSON body.', 'invalid_json', 400);
-    }
-
-    const { order, replayed, priceMismatch } = await placeOrder(body, key);
+    const [body, viewer] = await Promise.all([readJson(req), getViewer()]);
+    const { order, replayed, priceMismatch } = await placeOrder(body, key, viewer?.user.id ?? null);
 
     return ok(
       { order, replayed, priceMismatch },

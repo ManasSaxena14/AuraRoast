@@ -1,27 +1,32 @@
 /**
  * The repository API. Services depend on THIS, never on a driver.
  *
- * Every export below reads and writes the in-process adapter
- * (`./memory/store.ts`). The Neon/Drizzle path is schema-only so far
- * (`./schema.ts`, no query layer), so `DATABASE_URL` selects nothing yet.
+ * Two adapters implement it:
  *
- * It honours the three correctness rules from Part 9. The atomic
- * capacity check below is the in-process equivalent of:
+ *   · `./pg.ts` — Postgres (Neon over HTTP, or any Postgres over node-postgres),
+ *     selected whenever `DATABASE_URL` is set. It is the ONLY source of truth
+ *     then: on a serverless host every request may land on a different
+ *     instance, so nothing transactional is ever read back from memory.
+ *   · the in-process adapter below (`./memory/store.ts`) — zero credentials,
+ *     the whole product end to end, for local development and review.
  *
- *   UPDATE reservation_slots
- *      SET booked_count = booked_count + $seats
- *    WHERE id = $id AND booked_count + $seats <= capacity
- *   RETURNING capacity - booked_count AS remaining;
+ * Both honour the same correctness rules (Part 9): the atomic capacity check,
+ * idempotency with three distinct outcomes, and loyalty derived on read.
  *
- * — one statement, no read-then-write, zero rows affected when it is full.
+ * The catalogue is shared by both: `./catalogue.ts` serves one normalised,
+ * cached snapshot whichever backend holds it.
  */
 import { deriveLoyalty } from '@/domain/loyalty';
 import { SlotFullError } from '@/domain/errors';
 import { seatsConsumed } from '@/domain/slots';
+import { orderNumber as mintOrderNumber, shortCode } from '@/lib/ids';
+import { GUIDES } from '@/data/guides';
+import { MODIFIERS } from '@/data/modifiers';
 import type {
   Drink,
   Guide,
   LoyaltyLedgerEntry,
+  Modifier,
   Order,
   Origin,
   Reservation,
@@ -32,190 +37,78 @@ import type {
   Subscription,
   User,
 } from '@/domain/types';
-import { catalogue, commit, db, nextOrderNumber, type IdempotencyRecord } from './memory/store';
-import { isPostgres as pgActive, getDb } from './client';
+import { commit, db, type IdempotencyRecord } from './memory/store';
+import { isPostgres } from './client';
+import { catalogueSnapshot, sellableMap } from './catalogue';
+import * as pg from './pg';
+import type { UpdateGuard } from './pg';
 
-/** True when connected to Neon via Drizzle */
-export const usingPostgres = pgActive;
+export type { UpdateGuard };
 
-/**
- * Where the data actually lives, surfaced by `/api/health` and the admin page.
- */
-export function backendName(): 'postgres-neon' | 'in-process' {
-  return usingPostgres ? 'postgres-neon' : 'in-process';
+/** True when connected to Postgres. */
+export const usingPostgres = isPostgres;
+
+/** Where the data actually lives, surfaced by `/api/health` and the admin page. */
+export function backendName(): 'postgres' | 'in-process' {
+  return usingPostgres ? 'postgres' : 'in-process';
 }
-
-import { eq } from 'drizzle-orm';
-import * as schema from './schema';
 
 /* ── Catalogue ──────────────────────────────────────────────────────── */
 export async function listDrinks(): Promise<Drink[]> {
-  const dbClient = await getDb();
-  if (dbClient) {
-    try {
-      const rows = await dbClient.select().from(schema.drinks).orderBy(schema.drinks.sortOrder);
-      if (rows.length > 0) {
-        return rows.map((r) => {
-          const match = catalogue.drinks.find((d) => d.slug === r.slug);
-          return {
-            id: r.id,
-            slug: r.slug,
-            name: r.name,
-            category: r.category,
-            originId: r.originId ?? match?.originId ?? null,
-            roast: (r.roast as any) ?? match?.roast ?? null,
-            description: r.description,
-            longDescription: r.longDescription ?? match?.longDescription ?? '',
-            tastingNotes: r.tastingNotes ?? match?.tastingNotes ?? [],
-            allergens: r.allergens ?? match?.allergens ?? [],
-            caffeineMg: r.caffeineMg,
-            basePrice: r.basePrice,
-            imageUrl: r.imageUrl ?? match?.imageUrl ?? '',
-            isSeasonal: r.isSeasonal,
-            isAvailable: r.isAvailable,
-            isIced: r.isIced,
-            intensity: r.intensity,
-            sortOrder: r.sortOrder,
-            allowedModifiers: match?.allowedModifiers ?? ['size', 'milk', 'shot', 'syrup', 'temperature'],
-            defaultModifiers: match?.defaultModifiers ?? { size: 'regular', milk: 'whole' },
-          };
-        });
-      }
-    } catch (err) {
-      console.warn('[repositories] Neon listDrinks error, using fallback:', err);
-    }
-  }
-  return [...catalogue.drinks].sort((a, b) => a.sortOrder - b.sortOrder);
-}
-export async function getDrinkBySlug(slug: string): Promise<Drink | null> {
-  const map = await catalogueMap();
-  return map.get(slug) ?? null;
-}
-export async function getDrinkById(id: string): Promise<Drink | null> {
-  const map = await catalogueMap();
-  return map.get(id) ?? null;
-}
-export async function catalogueMap(): Promise<Map<string, Drink>> {
-  const { PAIRINGS } = await import('@/data/pairings');
-  const drinks = await listDrinks();
-  const map = new Map<string, Drink>();
-  for (const d of drinks) {
-    map.set(d.id, d);
-    map.set(d.slug, d);
-  }
-  for (const p of PAIRINGS) {
-    const item: Drink = {
-      id: p.id,
-      slug: p.slug,
-      name: p.name,
-      category: 'pairings',
-      originId: null,
-      roast: null,
-      description: p.description,
-      longDescription: p.pairingNote,
-      tastingNotes: [],
-      allergens: p.allergens,
-      caffeineMg: 0,
-      basePrice: p.price,
-      imageUrl: p.imageUrl,
-      isSeasonal: false,
-      isAvailable: p.isAvailable,
-      isIced: false,
-      intensity: 0,
-      sortOrder: 200 + p.sortOrder,
-      allowedModifiers: [],
-      defaultModifiers: {},
-    };
-    map.set(p.id, item);
-    map.set(p.slug, item);
-    map.set(`pairing-${p.id}`, item);
-  }
-  return map;
-}
-export async function listModifiers() {
-  return catalogue.modifiers;
-}
-export async function listOrigins(): Promise<Origin[]> {
-  const dbClient = await getDb();
-  if (dbClient) {
-    try {
-      const rows = await dbClient.select().from(schema.origins);
-      if (rows.length > 0) {
-        return rows.map((r) => {
-          const match = catalogue.origins.find((o) => o.slug === r.slug);
-          return {
-            id: r.id,
-            slug: r.slug,
-            name: r.name,
-            country: r.country,
-            lat: r.lat,
-            lng: r.lng,
-            altitudeM: r.altitudeM ?? match?.altitudeM ?? 0,
-            process: r.process ?? match?.process ?? '',
-            farmerName: r.farmerName ?? match?.farmerName ?? '',
-            farmerStory: r.farmerStory ?? match?.farmerStory ?? '',
-            heroImage: r.heroImage ?? match?.heroImage ?? '',
-            varietal: r.varietal ?? match?.varietal ?? '',
-            harvest: r.harvest ?? match?.harvest ?? '',
-          };
-        });
-      }
-    } catch (err) {
-      console.warn('[repositories] Neon listOrigins error, using fallback:', err);
-    }
-  }
-  return catalogue.origins;
-}
-export async function getOrigin(slug: string): Promise<Origin | null> {
-  const origins = await listOrigins();
-  return origins.find((o) => o.slug === slug) ?? null;
-}
-export async function listStores(): Promise<Store[]> {
-  const dbClient = await getDb();
-  if (dbClient) {
-    try {
-      const rows = await dbClient.select().from(schema.stores).where(eq(schema.stores.isActive, true));
-      if (rows.length > 0) {
-        return rows.map((r) => {
-          const match = catalogue.stores.find((s) => s.slug === r.slug);
-          return {
-            id: r.id,
-            slug: r.slug,
-            name: r.name,
-            address: r.address,
-            city: r.city,
-            lat: r.lat,
-            lng: r.lng,
-            phone: r.phone ?? match?.phone ?? '',
-            hours: (r.hours as Record<string, [string, string]>) ?? match?.hours ?? {},
-            isActive: r.isActive,
-            blurb: r.blurb ?? match?.blurb ?? '',
-          };
-        });
-      }
-    } catch (err) {
-      console.warn('[repositories] Neon listStores error, using fallback:', err);
-    }
-  }
-  return catalogue.stores.filter((s) => s.isActive);
-}
-export async function getStore(idOrSlug: string): Promise<Store | null> {
-  const stores = await listStores();
-  return stores.find((s) => s.id === idOrSlug || s.slug === idOrSlug) ?? null;
-}
-export async function listGuides(): Promise<Guide[]> {
-  return catalogue.guides;
-}
-export async function getGuide(slug: string): Promise<Guide | null> {
-  return catalogue.guides.find((g) => g.slug === slug) ?? null;
+  return (await catalogueSnapshot()).drinks;
 }
 
-/** Full-text-ish search. Postgres does this with `search_vector` + GIN (§4.3). */
+/** Every sellable thing by id, slug and legacy key — drinks AND pairings. */
+export async function catalogueMap(): Promise<Map<string, Drink>> {
+  return sellableMap();
+}
+
+export async function getDrinkBySlug(slug: string): Promise<Drink | null> {
+  return (await sellableMap()).get(slug) ?? null;
+}
+
+export async function getDrinkById(id: string): Promise<Drink | null> {
+  return (await sellableMap()).get(id) ?? null;
+}
+
+export async function listModifiers(): Promise<Modifier[]> {
+  return MODIFIERS;
+}
+
+export async function listOrigins(): Promise<Origin[]> {
+  return (await catalogueSnapshot()).origins;
+}
+
+export async function getOrigin(slug: string): Promise<Origin | null> {
+  return (await listOrigins()).find((o) => o.slug === slug) ?? null;
+}
+
+export async function listStores(): Promise<Store[]> {
+  return (await catalogueSnapshot()).stores.filter((s) => s.isActive);
+}
+
+/** Any room an order may point at — including one that has since closed. */
+export async function getStore(idOrSlug: string): Promise<Store | null> {
+  const snap = await catalogueSnapshot();
+  const id = snap.storeAppId.get(idOrSlug) ?? idOrSlug;
+  return snap.stores.find((s) => s.id === id || s.slug === idOrSlug) ?? null;
+}
+
+export async function listGuides(): Promise<Guide[]> {
+  return GUIDES;
+}
+
+export async function getGuide(slug: string): Promise<Guide | null> {
+  return GUIDES.find((g) => g.slug === slug) ?? null;
+}
+
+/** Full-text-ish search. Postgres would do this with `search_vector` + GIN (§4.3). */
 export async function searchDrinks(q: string): Promise<Drink[]> {
+  const drinks = await listDrinks();
   const needle = q.trim().toLowerCase();
-  if (!needle) return listDrinks();
+  if (!needle) return drinks;
   const terms = needle.split(/\s+/);
-  return catalogue.drinks
+  return drinks
     .map((d) => {
       const hayA = d.name.toLowerCase();
       const hayB = d.description.toLowerCase();
@@ -233,300 +126,78 @@ export async function searchDrinks(q: string): Promise<Drink[]> {
     .map((r) => r.d);
 }
 
-function safeUuid(val: string | null | undefined): string | null {
-  if (!val) return null;
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  return uuidRegex.test(val) ? val : null;
-}
-
 /* ── Orders ─────────────────────────────────────────────────────────── */
-export async function insertOrder(order: Omit<Order, 'orderNumber'> & { orderNumber?: string }): Promise<Order> {
-  const row: Order = { ...order, orderNumber: order.orderNumber ?? nextOrderNumber() } as Order;
+const byPlacedDesc = (a: Order, b: Order) => b.placedAt.localeCompare(a.placedAt);
+
+export async function insertOrder(order: Omit<Order, 'orderNumber'>): Promise<Order> {
+  if (usingPostgres) return pg.insertOrder(order);
+  let orderNumber = mintOrderNumber();
+  while (db.orders.some((o) => o.orderNumber === orderNumber)) orderNumber = mintOrderNumber();
+  const row: Order = { ...order, orderNumber };
   db.orders.unshift(row);
   commit();
-
-  const dbClient = await getDb();
-  if (dbClient) {
-    try {
-      await dbClient
-        .insert(schema.orders)
-        .values({
-          id: row.id,
-          orderNumber: row.orderNumber,
-          userId: safeUuid(row.userId),
-          guestName: row.guestName,
-          guestEmail: row.guestEmail,
-          guestPhone: row.guestPhone,
-          storeId: safeUuid(row.storeId),
-          fulfillment: row.fulfillment,
-          addressLine: row.addressLine,
-          deliveryLat: row.deliveryLat,
-          deliveryLng: row.deliveryLng,
-          subtotal: row.subtotal,
-          tax: row.tax,
-          deliveryFee: row.deliveryFee,
-          tip: row.tip,
-          discount: row.discount,
-          total: row.total,
-          currency: row.currency,
-          status: row.status as any,
-          paymentMethod: row.paymentMethod as any,
-          paymentStatus: row.paymentStatus as any,
-          upiTransactionRef: row.upiTransactionRef,
-          deliveryPlan: row.deliveryPlan as any,
-          routeGeometry: row.routeGeometry as any,
-          routeSource: row.routeSource,
-          derivedStage: row.derivedStage as any,
-          placedAt: new Date(row.placedAt),
-          confirmedAt: row.confirmedAt ? new Date(row.confirmedAt) : null,
-          cancelledAt: row.cancelledAt ? new Date(row.cancelledAt) : null,
-        })
-        .onConflictDoUpdate({
-          target: schema.orders.orderNumber,
-          set: {
-            status: row.status as any,
-            paymentStatus: row.paymentStatus as any,
-            upiTransactionRef: row.upiTransactionRef,
-          },
-        });
-
-      if (row.items && row.items.length > 0) {
-        for (const item of row.items) {
-          await dbClient
-            .insert(schema.orderItems)
-            .values({
-              id: item.id,
-              orderId: row.id,
-              drinkId: safeUuid(item.drinkId),
-              nameSnapshot: item.nameSnapshot,
-              unitPrice: item.unitPrice,
-              quantity: item.quantity,
-              modifiers: item.modifiers as any,
-            })
-            .catch(() => {});
-        }
-      }
-    } catch (err) {
-      console.warn('[repositories] Neon insertOrder error:', err);
-    }
-  }
-
   return row;
 }
 
 export async function getOrderByNumber(orderNumber: string): Promise<Order | null> {
-  const mem = db.orders.find((o) => o.orderNumber === orderNumber);
-  if (mem) return mem;
-
-  const dbClient = await getDb();
-  if (dbClient) {
-    try {
-      const [orderRow] = await dbClient
-        .select()
-        .from(schema.orders)
-        .where(eq(schema.orders.orderNumber, orderNumber));
-
-      if (orderRow) {
-        const itemRows = await dbClient
-          .select()
-          .from(schema.orderItems)
-          .where(eq(schema.orderItems.orderId, orderRow.id));
-
-        const order: Order = {
-          id: orderRow.id,
-          orderNumber: orderRow.orderNumber,
-          userId: orderRow.userId,
-          guestName: orderRow.guestName,
-          guestEmail: orderRow.guestEmail,
-          guestPhone: orderRow.guestPhone,
-          storeId: orderRow.storeId,
-          fulfillment: orderRow.fulfillment as any,
-          addressLine: orderRow.addressLine,
-          deliveryLat: orderRow.deliveryLat,
-          deliveryLng: orderRow.deliveryLng,
-          subtotal: orderRow.subtotal,
-          tax: orderRow.tax,
-          deliveryFee: orderRow.deliveryFee,
-          tip: orderRow.tip,
-          discount: orderRow.discount,
-          total: orderRow.total,
-          currency: orderRow.currency,
-          status: orderRow.status as any,
-          paymentMethod: orderRow.paymentMethod as any,
-          paymentStatus: orderRow.paymentStatus as any,
-          upiTransactionRef: orderRow.upiTransactionRef,
-          verifiedAt: orderRow.verifiedAt ? orderRow.verifiedAt.toISOString() : null,
-          deliveryPlan: orderRow.deliveryPlan as any,
-          routeGeometry: orderRow.routeGeometry as any,
-          routeSource: orderRow.routeSource as any,
-          derivedStage: orderRow.derivedStage as any,
-          placedAt: orderRow.placedAt ? orderRow.placedAt.toISOString() : new Date().toISOString(),
-          confirmedAt: orderRow.confirmedAt ? orderRow.confirmedAt.toISOString() : null,
-          cancelledAt: orderRow.cancelledAt ? orderRow.cancelledAt.toISOString() : null,
-          items: itemRows.map((it) => ({
-            id: it.id,
-            drinkId: it.drinkId,
-            nameSnapshot: it.nameSnapshot,
-            unitPrice: it.unitPrice,
-            quantity: it.quantity,
-            modifiers: (it.modifiers as any) ?? [],
-            lineTotal: it.unitPrice * it.quantity,
-          })),
-        };
-        db.orders.unshift(order);
-        return order;
-      }
-    } catch (err) {
-      console.warn('[repositories] Neon getOrderByNumber error:', err);
-    }
-  }
-
-  return null;
+  if (usingPostgres) return pg.getOrderByNumber(orderNumber);
+  return db.orders.find((o) => o.orderNumber === orderNumber) ?? null;
 }
 
-export async function updateOrder(orderNumber: string, patch: Partial<Order>): Promise<Order | null> {
+/** Returns null when the order is missing or the guard does not hold. */
+export async function updateOrder(
+  orderNumber: string,
+  patch: Partial<Order>,
+  guard: UpdateGuard = {},
+): Promise<Order | null> {
+  if (usingPostgres) return pg.updateOrder(orderNumber, patch, guard);
   const i = db.orders.findIndex((o) => o.orderNumber === orderNumber);
-  if (i !== -1) {
-    db.orders[i] = { ...db.orders[i], ...patch };
-    commit();
-  }
-
-  const dbClient = await getDb();
-  if (dbClient) {
-    try {
-      const updateData: Record<string, unknown> = {};
-      if (patch.status) updateData.status = patch.status;
-      if (patch.paymentStatus) updateData.paymentStatus = patch.paymentStatus;
-      if (patch.upiTransactionRef !== undefined) updateData.upiTransactionRef = patch.upiTransactionRef;
-      if (patch.confirmedAt) updateData.confirmedAt = new Date(patch.confirmedAt);
-      if (patch.cancelledAt) updateData.cancelledAt = new Date(patch.cancelledAt);
-      if (patch.verifiedAt) updateData.verifiedAt = new Date(patch.verifiedAt);
-      if (patch.derivedStage) updateData.derivedStage = patch.derivedStage;
-
-      if (Object.keys(updateData).length > 0) {
-        await dbClient
-          .update(schema.orders)
-          .set(updateData)
-          .where(eq(schema.orders.orderNumber, orderNumber));
-      }
-    } catch (err) {
-      console.warn('[repositories] Neon updateOrder error:', err);
-    }
-  }
-
-  return i !== -1 ? db.orders[i] : null;
+  if (i === -1) return null;
+  const current = db.orders[i];
+  if (guard.status?.length && !guard.status.includes(current.status)) return null;
+  if (guard.paymentStatus?.length && !guard.paymentStatus.includes(current.paymentStatus)) return null;
+  db.orders[i] = { ...current, ...patch };
+  commit();
+  return db.orders[i];
 }
 
-export async function listOrders(opts: { userId?: string; limit?: number } = {}): Promise<Order[]> {
-  const dbClient = await getDb();
-  if (dbClient) {
-    try {
-      let query = dbClient.select().from(schema.orders);
-      if (opts.userId && safeUuid(opts.userId)) {
-        query = query.where(eq(schema.orders.userId, opts.userId)) as any;
-      }
-      const rows = await query.limit(opts.limit ?? 50);
-      if (rows.length > 0) {
-        return rows.map((orderRow) => ({
-          id: orderRow.id,
-          orderNumber: orderRow.orderNumber,
-          userId: orderRow.userId,
-          guestName: orderRow.guestName,
-          guestEmail: orderRow.guestEmail,
-          guestPhone: orderRow.guestPhone,
-          storeId: orderRow.storeId,
-          fulfillment: orderRow.fulfillment as any,
-          addressLine: orderRow.addressLine,
-          deliveryLat: orderRow.deliveryLat,
-          deliveryLng: orderRow.deliveryLng,
-          subtotal: orderRow.subtotal,
-          tax: orderRow.tax,
-          deliveryFee: orderRow.deliveryFee,
-          tip: orderRow.tip,
-          discount: orderRow.discount,
-          total: orderRow.total,
-          currency: orderRow.currency,
-          status: orderRow.status as any,
-          paymentMethod: orderRow.paymentMethod as any,
-          paymentStatus: orderRow.paymentStatus as any,
-          upiTransactionRef: orderRow.upiTransactionRef,
-          verifiedAt: orderRow.verifiedAt ? orderRow.verifiedAt.toISOString() : null,
-          deliveryPlan: orderRow.deliveryPlan as any,
-          routeGeometry: orderRow.routeGeometry as any,
-          routeSource: orderRow.routeSource as any,
-          derivedStage: orderRow.derivedStage as any,
-          placedAt: orderRow.placedAt ? orderRow.placedAt.toISOString() : new Date().toISOString(),
-          confirmedAt: orderRow.confirmedAt ? orderRow.confirmedAt.toISOString() : null,
-          cancelledAt: orderRow.cancelledAt ? orderRow.cancelledAt.toISOString() : null,
-          items: [],
-        }));
-      }
-    } catch (err) {
-      console.warn('[repositories] Neon listOrders error:', err);
-    }
-  }
-
-  let rows = db.orders;
-  if (opts.userId) rows = rows.filter((o) => o.userId === opts.userId);
-  return rows.slice(0, opts.limit ?? 50);
+export async function listOrders(opts: { limit?: number } = {}): Promise<Order[]> {
+  if (usingPostgres) return pg.listOrders(opts);
+  return [...db.orders].sort(byPlacedDesc).slice(0, opts.limit ?? 50);
 }
 
-/** Backed by the partial index `idx_orders_pending_upi` (§4.3). */
-export async function listPendingUpiOrders(): Promise<Order[]> {
-  const dbClient = await getDb();
-  if (dbClient) {
-    try {
-      const rows = await dbClient
-        .select()
-        .from(schema.orders)
-        .where(
-          eq(schema.orders.paymentMethod, 'upi'),
-        );
-      if (rows.length > 0) {
-        return rows
-          .filter((r) => r.paymentStatus === 'pending')
-          .map((orderRow) => ({
-            id: orderRow.id,
-            orderNumber: orderRow.orderNumber,
-            userId: orderRow.userId,
-            guestName: orderRow.guestName,
-            guestEmail: orderRow.guestEmail,
-            guestPhone: orderRow.guestPhone,
-            storeId: orderRow.storeId,
-            fulfillment: orderRow.fulfillment as any,
-            addressLine: orderRow.addressLine,
-            deliveryLat: orderRow.deliveryLat,
-            deliveryLng: orderRow.deliveryLng,
-            subtotal: orderRow.subtotal,
-            tax: orderRow.tax,
-            deliveryFee: orderRow.deliveryFee,
-            tip: orderRow.tip,
-            discount: orderRow.discount,
-            total: orderRow.total,
-            currency: orderRow.currency,
-            status: orderRow.status as any,
-            paymentMethod: orderRow.paymentMethod as any,
-            paymentStatus: orderRow.paymentStatus as any,
-            upiTransactionRef: orderRow.upiTransactionRef,
-            verifiedAt: orderRow.verifiedAt ? orderRow.verifiedAt.toISOString() : null,
-            deliveryPlan: orderRow.deliveryPlan as any,
-            routeGeometry: orderRow.routeGeometry as any,
-            routeSource: orderRow.routeSource as any,
-            derivedStage: orderRow.derivedStage as any,
-            placedAt: orderRow.placedAt ? orderRow.placedAt.toISOString() : new Date().toISOString(),
-            confirmedAt: orderRow.confirmedAt ? orderRow.confirmedAt.toISOString() : null,
-            cancelledAt: orderRow.cancelledAt ? orderRow.cancelledAt.toISOString() : null,
-            items: [],
-          }));
-      }
-    } catch (err) {
-      console.warn('[repositories] Neon listPendingUpiOrders error:', err);
-    }
-  }
-
+export async function listOrdersForUser(
+  userId: string,
+  email: string | null,
+  limit = 30,
+): Promise<Order[]> {
+  if (usingPostgres) return pg.listOrdersForUser(userId, email, limit);
+  const mail = email?.trim().toLowerCase();
   return db.orders
-    .filter((o) => o.paymentMethod === 'upi' && o.paymentStatus === 'pending')
-    .sort((a, b) => b.placedAt.localeCompare(a.placedAt));
+    .filter((o) => o.userId === userId || (!!mail && o.guestEmail?.toLowerCase() === mail))
+    .sort(byPlacedDesc)
+    .slice(0, limit);
+}
+
+export async function findLatestOrderByContact(contact: string): Promise<Order | null> {
+  if (usingPostgres) return pg.findLatestOrderByContact(contact);
+  const value = contact.trim();
+  const digits = value.replace(/\D/g, '');
+  const matches = db.orders.filter((o) =>
+    value.includes('@')
+      ? o.guestEmail?.toLowerCase() === value.toLowerCase()
+      : digits.length >= 10 && (o.guestPhone ?? '').replace(/\D/g, '').slice(-10) === digits.slice(-10),
+  );
+  return matches.sort(byPlacedDesc)[0] ?? null;
+}
+
+export async function listPendingUpiOrders(): Promise<Order[]> {
+  if (usingPostgres) return pg.listPendingUpiOrders();
+  return db.orders
+    .filter(
+      (o) => o.paymentMethod === 'upi' && o.paymentStatus === 'pending' && o.status === 'pending_payment',
+    )
+    .sort(byPlacedDesc);
 }
 
 /* ── Reservation slots — the atomic capacity check (§9.2) ───────────── */
@@ -535,18 +206,23 @@ export async function listSlots(
   slotDate: string,
   type: ReservationType = 'table',
 ): Promise<ReservationSlot[]> {
+  if (usingPostgres) return pg.listSlots(storeId, slotDate, type);
+  const snap = await catalogueSnapshot();
+  const id = snap.storeAppId.get(storeId) ?? storeId;
   return db.slots
-    .filter((s) => s.storeId === storeId && s.slotDate === slotDate && s.type === type)
+    .filter((s) => s.storeId === id && s.slotDate === slotDate && s.type === type)
     .sort((a, b) => a.slotTime.localeCompare(b.slotTime));
 }
 
 export async function listEventSlots(fromDate: string): Promise<ReservationSlot[]> {
+  if (usingPostgres) return pg.listEventSlots(fromDate);
   return db.slots
     .filter((s) => s.type === 'event' && s.slotDate >= fromDate)
     .sort((a, b) => (a.slotDate + a.slotTime).localeCompare(b.slotDate + b.slotTime));
 }
 
 export async function getSlot(id: string): Promise<ReservationSlot | null> {
+  if (usingPostgres) return pg.getSlot(id);
   return db.slots.find((s) => s.id === id) ?? null;
 }
 
@@ -556,6 +232,7 @@ export async function getSlot(id: string): Promise<ReservationSlot | null> {
  * prevents. Returns the remaining seats, or throws `SlotFullError`.
  */
 export async function bookSlotAtomically(slotId: string, partySize: number): Promise<number> {
+  if (usingPostgres) return pg.bookSlotAtomically(slotId, partySize);
   const slot = db.slots.find((s) => s.id === slotId);
   if (!slot) throw new SlotFullError(0);
 
@@ -571,58 +248,71 @@ export async function bookSlotAtomically(slotId: string, partySize: number): Pro
 }
 
 export async function releaseSlot(slotId: string, partySize: number): Promise<void> {
+  if (usingPostgres) return pg.releaseSlot(slotId, partySize);
   const slot = db.slots.find((s) => s.id === slotId);
   if (!slot) return;
   slot.bookedCount = Math.max(0, slot.bookedCount - seatsConsumed(slot.type, partySize));
   commit();
 }
 
+function withSlotAndStore(r: Reservation, stores: Store[]): Reservation {
+  const slot = db.slots.find((s) => s.id === r.slotId);
+  return { ...r, slot, store: slot ? stores.find((s) => s.id === slot.storeId) : undefined };
+}
+
 export async function insertReservation(r: Reservation): Promise<Reservation> {
+  if (usingPostgres) return pg.insertReservation(r);
   db.reservations.unshift(r);
   commit();
-  return r;
+  return withSlotAndStore(r, (await catalogueSnapshot()).stores);
 }
 
 export async function getReservation(reference: string): Promise<Reservation | null> {
+  if (usingPostgres) return pg.getReservation(reference);
   const r = db.reservations.find((x) => x.reference === reference);
-  if (!r) return null;
-  const slot = db.slots.find((s) => s.id === r.slotId);
-  const store = slot ? catalogue.stores.find((s) => s.id === slot.storeId) : undefined;
-  return { ...r, slot, store };
+  return r ? withSlotAndStore(r, (await catalogueSnapshot()).stores) : null;
 }
 
 export async function updateReservation(
   reference: string,
   patch: Partial<Reservation>,
 ): Promise<Reservation | null> {
+  if (usingPostgres) return pg.updateReservation(reference, patch);
   const i = db.reservations.findIndex((x) => x.reference === reference);
   if (i === -1) return null;
   db.reservations[i] = { ...db.reservations[i], ...patch };
   commit();
-  return db.reservations[i];
+  return withSlotAndStore(db.reservations[i], (await catalogueSnapshot()).stores);
 }
 
 export async function listReservations(userId?: string): Promise<Reservation[]> {
+  if (usingPostgres) return pg.listReservations(userId);
+  const stores = (await catalogueSnapshot()).stores;
   const rows = userId ? db.reservations.filter((r) => r.userId === userId) : db.reservations;
-  return rows.map((r) => {
-    const slot = db.slots.find((s) => s.id === r.slotId);
-    return { ...r, slot, store: slot ? catalogue.stores.find((s) => s.id === slot.storeId) : undefined };
-  });
+  return rows.map((r) => withSlotAndStore(r, stores));
 }
 
 /* ── Reviews ────────────────────────────────────────────────────────── */
 export async function listReviews(drinkId: string): Promise<Review[]> {
+  if (usingPostgres) return pg.listReviews(drinkId);
   return db.reviews
     .filter((r) => r.drinkId === drinkId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
+
 export async function insertReview(r: Review): Promise<Review> {
+  if (usingPostgres) return pg.insertReview(r);
+  const existing = r.userId
+    ? db.reviews.findIndex((x) => x.drinkId === r.drinkId && x.userId === r.userId)
+    : -1;
+  if (existing !== -1) db.reviews.splice(existing, 1);
   db.reviews.unshift(r);
   commit();
   return r;
 }
+
 export async function ratingSummary(drinkId: string): Promise<{ average: number; count: number }> {
-  const rows = db.reviews.filter((r) => r.drinkId === drinkId);
+  const rows = await listReviews(drinkId);
   if (!rows.length) return { average: 0, count: 0 };
   return {
     average: rows.reduce((a, r) => a + r.rating, 0) / rows.length,
@@ -631,12 +321,47 @@ export async function ratingSummary(drinkId: string): Promise<{ average: number;
 }
 
 /* ── Users & loyalty — tier is DERIVED, never stored (§9.4) ─────────── */
-export async function getUser(id: string): Promise<User | null> {
-  return db.users.find((u) => u.id === id) ?? null;
-}
 export const DEMO_USER_ID = 'usr-demo';
 
+export async function getUser(id: string): Promise<User | null> {
+  if (usingPostgres) return pg.getUser(id);
+  return db.users.find((u) => u.id === id) ?? null;
+}
+
+/** Called on every Google sign-in: find the guest by email or open their account. */
+export async function upsertOAuthUser(input: {
+  email: string;
+  name?: string | null;
+  image?: string | null;
+}): Promise<User> {
+  if (usingPostgres) return pg.upsertOAuthUser(input);
+  const email = input.email.trim().toLowerCase();
+  const existing = db.users.find((u) => u.email.toLowerCase() === email);
+  if (existing) {
+    existing.name = input.name ?? existing.name;
+    existing.image = input.image ?? existing.image;
+    commit();
+    return existing;
+  }
+  const user: User = {
+    id: `usr-${shortCode(10).toLowerCase()}`,
+    name: input.name ?? email.split('@')[0],
+    email,
+    image: input.image ?? null,
+    lifetimePoints: 0,
+    referralCode: `AURA-${shortCode(4)}`,
+    locale: 'en-IN',
+    currency: 'INR',
+    isAdmin: false,
+    createdAt: new Date().toISOString(),
+  };
+  db.users.push(user);
+  commit();
+  return user;
+}
+
 export async function loyaltyFor(userId: string) {
+  if (usingPostgres) return pg.loyaltyFor(userId);
   const user = await getUser(userId);
   if (!user) return null;
   // `deriveLoyalty` is called on READ. Nothing here writes a tier back.
@@ -644,6 +369,7 @@ export async function loyaltyFor(userId: string) {
 }
 
 export async function listLedger(userId: string): Promise<LoyaltyLedgerEntry[]> {
+  if (usingPostgres) return pg.listLedger(userId);
   return db.ledger
     .filter((l) => l.userId === userId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -655,6 +381,7 @@ export async function accruePoints(
   reason: string,
   orderId: string | null,
 ): Promise<void> {
+  if (usingPostgres) return pg.accruePoints(userId, delta, reason, orderId);
   const user = db.users.find((u) => u.id === userId);
   if (!user) return;
   user.lifetimePoints = Math.max(0, user.lifetimePoints + delta);
@@ -671,17 +398,22 @@ export async function accruePoints(
 
 /* ── Subscriptions ──────────────────────────────────────────────────── */
 export async function listSubscriptions(userId: string): Promise<Subscription[]> {
+  if (usingPostgres) return pg.listSubscriptions(userId);
   return db.subscriptions.filter((s) => s.userId === userId);
 }
+
 export async function insertSubscription(s: Subscription): Promise<Subscription> {
+  if (usingPostgres) return pg.insertSubscription(s);
   db.subscriptions.unshift(s);
   commit();
   return s;
 }
+
 export async function updateSubscription(
   id: string,
   patch: Partial<Subscription>,
 ): Promise<Subscription | null> {
+  if (usingPostgres) return pg.updateSubscription(id, patch);
   const i = db.subscriptions.findIndex((s) => s.id === id);
   if (i === -1) return null;
   db.subscriptions[i] = { ...db.subscriptions[i], ...patch };
@@ -694,6 +426,7 @@ export async function claimIdempotencyKey(
   key: string,
   requestHash: string,
 ): Promise<{ outcome: 'claimed' | 'replay' | 'conflict' | 'in_progress'; record?: IdempotencyRecord }> {
+  if (usingPostgres) return pg.claimIdempotencyKey(key, requestHash);
   const now = Date.now();
   const existing = db.idempotency[key];
 
@@ -723,6 +456,7 @@ export async function completeIdempotencyKey(
   statusCode: number,
   response: unknown,
 ): Promise<void> {
+  if (usingPostgres) return pg.completeIdempotencyKey(key, statusCode, response);
   const rec = db.idempotency[key];
   if (!rec) return;
   rec.statusCode = statusCode;
@@ -732,16 +466,13 @@ export async function completeIdempotencyKey(
 }
 
 export async function releaseIdempotencyKey(key: string): Promise<void> {
+  if (usingPostgres) return pg.releaseIdempotencyKey(key);
   delete db.idempotency[key];
   commit();
 }
 
 /* ── Rate limiting — a Postgres-native token bucket, no Redis (§6.6) ── */
-export async function takeToken(
-  bucket: string,
-  limit: number,
-  windowMs: number,
-): Promise<{ ok: boolean; remaining: number; retryAfterSec: number }> {
+function takeTokenInMemory(bucket: string, limit: number, windowMs: number) {
   const now = Date.now();
   const windowStart = Math.floor(now / windowMs) * windowMs;
   db.rateLimits = db.rateLimits.filter((r) => r.windowStart >= now - windowMs * 3);
@@ -758,38 +489,78 @@ export async function takeToken(
   return { ok: true, remaining: limit - row.count, retryAfterSec: 0 };
 }
 
-/* ── Caches (§6.3, §6.4) ────────────────────────────────────────────── */
+export async function takeToken(
+  bucket: string,
+  limit: number,
+  windowMs: number,
+): Promise<{ ok: boolean; remaining: number; retryAfterSec: number }> {
+  if (usingPostgres) {
+    try {
+      return await pg.takeToken(bucket, limit, windowMs);
+    } catch (err) {
+      // A limiter outage must not take the endpoints it protects down with
+      // it; this instance's own bucket still applies.
+      console.warn('[rate-limit] Postgres bucket unavailable, using in-process:', err);
+    }
+  }
+  return takeTokenInMemory(bucket, limit, windowMs);
+}
+
+/* ── Caches (§6.3, §6.4) — best effort by definition ───────────────── */
 export async function getGeocodeCache(query: string) {
+  if (usingPostgres) {
+    try {
+      return await pg.getGeocodeCache(query);
+    } catch {
+      /* fall through to the in-process cache */
+    }
+  }
   return db.geocode[query] ?? null;
 }
+
 export async function putGeocodeCache(
   query: string,
   hit: { lat: number; lng: number; displayName: string },
 ) {
+  if (usingPostgres) {
+    try {
+      return await pg.putGeocodeCache(query, hit);
+    } catch {
+      /* fall through */
+    }
+  }
   db.geocode[query] = hit;
   commit();
 }
+
 export async function getWeatherCache(gridKey: string, ttlMs: number) {
+  if (usingPostgres) {
+    try {
+      return await pg.getWeatherCache(gridKey, ttlMs);
+    } catch {
+      /* fall through */
+    }
+  }
   const row = db.weather[gridKey];
   if (!row || Date.now() - row.fetchedAt > ttlMs) return null;
   return row.payload;
 }
-export async function putWeatherCache(gridKey: string, payload: unknown) {
-  db.weather[gridKey] = { payload, fetchedAt: Date.now() };
-  commit();
-}
 
-/* ── Chat sessions ──────────────────────────────────────────────────── */
-export async function getChat(sessionKey: string) {
-  return db.chat[sessionKey]?.messages ?? [];
-}
-export async function putChat(sessionKey: string, messages: unknown[]) {
-  db.chat[sessionKey] = { messages: messages.slice(-40), updatedAt: Date.now() };
+export async function putWeatherCache(gridKey: string, payload: unknown) {
+  if (usingPostgres) {
+    try {
+      return await pg.putWeatherCache(gridKey, payload);
+    } catch {
+      /* fall through */
+    }
+  }
+  db.weather[gridKey] = { payload, fetchedAt: Date.now() };
   commit();
 }
 
 /* ── Cleanup sweep — Postgres has no TTL indexes (§4.3) ─────────────── */
 export async function sweepExpired(): Promise<{ idempotency: number; rateLimits: number }> {
+  if (usingPostgres) return pg.sweepExpired();
   const now = Date.now();
   const before = Object.keys(db.idempotency).length;
   for (const [k, v] of Object.entries(db.idempotency)) {

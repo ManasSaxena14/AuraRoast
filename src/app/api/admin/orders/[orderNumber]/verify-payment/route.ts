@@ -1,27 +1,28 @@
 import { verifyUpiPayment } from '@/services/order';
-import { DEMO_USER_ID, getUser } from '@/repositories';
 import { ForbiddenError } from '@/domain/errors';
-import { fail, ok, requireBearer } from '@/lib/http';
+import { fail, hasBearer, ok } from '@/lib/http';
+import { getViewer } from '@/lib/session';
 
 export const runtime = 'nodejs';
 
 /**
- * The ONLY path that can confirm a UPI order (§8.4), so it is gated on a
- * server-side shared secret (§5.4).
+ * The ONLY path that can confirm a UPI order (§8.4).
  *
- * `getUser(DEMO_USER_ID).isAdmin` was never an identity check — the id is a
- * module constant, not something derived from the request, so every anonymous
- * caller satisfied it. Until Auth.js is wired (§5.1) the bearer token is the
- * gate; the demo user is kept only to attribute the verification. An unset
- * ADMIN_SECRET DENIES: a missing env var must not open the money path.
+ * Two ways in, both server-side:
+ *   · a signed-in admin — a Google account listed in ADMIN_EMAILS (or flagged
+ *     `is_admin` in the users table); this is what the /admin page uses
+ *   · `Authorization: Bearer $ADMIN_SECRET`, for scripts and back-office tools
+ *
+ * Neither variable set means nobody gets in: a missing env var must never be
+ * the thing that opens the money path.
  */
 export async function PATCH(req: Request, { params }: { params: Promise<{ orderNumber: string }> }) {
   try {
     const { orderNumber } = await params;
-    requireBearer(req, process.env.ADMIN_SECRET, 'admin');
-    const admin = await getUser(DEMO_USER_ID);
-    if (!admin?.isAdmin) throw new ForbiddenError('Admin only.');
-    return ok({ order: await verifyUpiPayment(orderNumber, admin.id) });
+    const viewer = await getViewer();
+    const bySecret = hasBearer(req, process.env.ADMIN_SECRET);
+    if (!viewer?.isAdmin && !bySecret) throw new ForbiddenError('Admin only.');
+    return ok({ order: await verifyUpiPayment(orderNumber, viewer?.user.id ?? 'bearer') });
   } catch (err) {
     return fail(err);
   }

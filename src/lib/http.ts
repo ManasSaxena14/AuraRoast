@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { DomainError, ForbiddenError } from '@/domain/errors';
 import { takeToken } from '@/repositories';
+import { ownsOrder, type Viewer } from './session';
 
 export function ok<T>(data: T, init?: ResponseInit) {
   return NextResponse.json(data, init);
@@ -41,10 +42,26 @@ function secretEquals(a: string, b: string): boolean {
  * publishes a privileged route.
  */
 export function requireBearer(req: Request, secret: string | undefined, what: string): void {
+  if (!hasBearer(req, secret)) throw new ForbiddenError(`Bad ${what} secret.`);
+}
+
+/** The same check, as a question — for routes that also accept a signed-in admin. */
+export function hasBearer(req: Request, secret: string | undefined): boolean {
   const header = req.headers.get('authorization') ?? '';
-  if (!secret || !secretEquals(header, `Bearer ${secret}`)) {
-    throw new ForbiddenError(`Bad ${what} secret.`);
-  }
+  return !!secret && secretEquals(header, `Bearer ${secret}`);
+}
+
+/**
+ * May this caller act on this order? Either they prove the contact detail
+ * given at checkout (a guest, from the device that placed it), or they are
+ * the signed-in account that owns it.
+ */
+export function mayManageOrder(
+  req: Request,
+  order: { guestEmail: string | null; guestPhone: string | null; userId: string | null },
+  viewer: Viewer | null,
+): boolean {
+  return provesContact(req, order.guestEmail, order.guestPhone) || ownsOrder(viewer, order);
 }
 
 /** Emails compare case-insensitively; phone numbers on their last 10 digits. */
@@ -94,6 +111,15 @@ export function clientKey(req: Request): string {
     return forwarded?.split(',')[0]?.trim() || 'shared';
   }
   return 'shared';
+}
+
+/** A JSON body, or a 400 the caller can read — never a SyntaxError-shaped 500. */
+export async function readJson(req: Request): Promise<unknown> {
+  try {
+    return await req.json();
+  } catch {
+    throw new DomainError('Malformed JSON body.', 'invalid_json', 400);
+  }
 }
 
 /** The Postgres-native token bucket (§6.6) — no Redis dependency. */

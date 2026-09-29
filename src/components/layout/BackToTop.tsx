@@ -7,7 +7,13 @@ export function BackToTop() {
   const [show, setShow] = useState(false);
 
   useEffect(() => {
-    const onScroll = () => setShow(window.scrollY > window.innerHeight * 2);
+    let last: boolean | null = null;
+    const onScroll = () => {
+      const next = window.scrollY > window.innerHeight * 2;
+      if (next === last) return; // a render per crossing, not per scroll frame
+      last = next;
+      setShow(next);
+    };
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);

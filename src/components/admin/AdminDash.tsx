@@ -5,9 +5,10 @@
  * Upgraded admin dashboard with search, filters, enhanced visuals, and
  * professional polish while preserving all existing functionality.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { formatMoney } from '@/domain/money';
-import { ORDER_STAGE_COPY } from '@/domain/state-machine';
+import { toDateKey } from '@/domain/slots';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/bits';
 import { toast } from '@/components/toast/ToastProvider';
@@ -17,24 +18,39 @@ import type { Drink, Order, Reservation, OrderStatus, PaymentStatus } from '@/do
 type Tab = 'payments' | 'orders' | 'reservations' | 'catalogue';
 type StatusFilter = 'all' | 'pending_payment' | 'confirmed' | 'preparing' | 'out_for_delivery' | 'delivered' | 'cancelled';
 
+/** Pinned to the shop's zone, so the server render and hydration agree. */
+const when = (iso: string) =>
+  new Date(iso).toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+/** The stage the order is actually at — derived on the server for this page. */
+const stageOf = (o: Order): OrderStatus => o.derivedStage ?? o.status;
+
 export function AdminDash({
   initialOrders,
   reservations,
   drinks,
   backend,
+  demo,
 }: {
   initialOrders: Order[];
   reservations: Reservation[];
   drinks: Drink[];
   backend: string;
+  demo: boolean;
 }) {
+  const router = useRouter();
+  const [refreshing, startRefresh] = useTransition();
   const [tab, setTab] = useState<Tab>('payments');
   const [orders, setOrders] = useState(initialOrders);
+  // A refresh re-renders the server page with fresh rows; take them.
+  useEffect(() => setOrders(initialOrders), [initialOrders]);
   const [verifying, setVerifying] = useState<string | null>(null);
-  /* The verify route is gated on ADMIN_SECRET (§5.4) and a browser cannot hold
-     a server secret. Until Auth.js is wired the operator supplies it here; it
-     is kept in component state only — never localStorage, never a URL. */
-  const [adminSecret, setAdminSecret] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [revenueFilter, setRevenueFilter] = useState<'all' | 'today'>('all');
@@ -44,9 +60,13 @@ export function AdminDash({
   });
 
   const pending = useMemo(
-    () => orders.filter((o) => o.paymentMethod === 'upi' && o.paymentStatus === 'pending'),
+    () =>
+      orders.filter(
+        (o) => o.paymentMethod === 'upi' && o.paymentStatus === 'pending' && o.status === 'pending_payment',
+      ),
     [orders],
   );
+  const today = toDateKey();
 
   const filtered = useMemo(() => {
     let result = [...orders];
@@ -60,14 +80,14 @@ export function AdminDash({
       );
     }
     if (statusFilter !== 'all') {
-      result = result.filter((o) => o.status === statusFilter);
+      result = result.filter((o) => stageOf(o) === statusFilter);
     }
     if (revenueFilter === 'today') {
-      const today = new Date().toISOString().slice(0, 10);
-      result = result.filter((o) => o.placedAt.startsWith(today));
+      // "Today" in the shop's zone: a UTC date calls a 2am order yesterday's.
+      result = result.filter((o) => toDateKey(new Date(o.placedAt)) === today);
     }
     return result;
-  }, [orders, search, statusFilter, revenueFilter]);
+  }, [orders, search, statusFilter, revenueFilter, today]);
 
   const sorted = useMemo(
     () =>
@@ -84,12 +104,13 @@ export function AdminDash({
     [orders],
   );
 
-  const todayRevenue = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    return orders
-      .filter((o) => o.status !== 'cancelled' && o.placedAt.startsWith(today))
-      .reduce((a, o) => a + o.total, 0);
-  }, [orders]);
+  const todayRevenue = useMemo(
+    () =>
+      orders
+        .filter((o) => o.status !== 'cancelled' && toDateKey(new Date(o.placedAt)) === today)
+        .reduce((a, o) => a + o.total, 0),
+    [orders, today],
+  );
 
   const avgOrderValue = useMemo(() => {
     const completed = orders.filter((o) => o.status !== 'cancelled');
@@ -98,13 +119,13 @@ export function AdminDash({
   }, [orders]);
 
   const popularDrink = useMemo(() => {
+    // Counted by the receipt name, which every line has — pairings carry no
+    // drink id, and an id is not something to show a person anyway.
     const counts = new Map<string, number>();
     for (const o of orders) {
       if (o.status === 'cancelled') continue;
       for (const item of o.items) {
-        if (item.drinkId) {
-          counts.set(item.drinkId, (counts.get(item.drinkId) ?? 0) + item.quantity);
-        }
+        counts.set(item.nameSnapshot, (counts.get(item.nameSnapshot) ?? 0) + item.quantity);
       }
     }
     let best: { name: string; count: number } | null = null;
@@ -114,29 +135,34 @@ export function AdminDash({
     return best;
   }, [orders]);
 
+  // Authorised by the signed-in staff session — no secret ever reaches the browser.
   const verify = useCallback(async (orderNumber: string) => {
     setVerifying(orderNumber);
     try {
-      const res = await fetch(`/api/admin/orders/${orderNumber}/verify-payment`, {
-        method: 'PATCH',
-        headers: adminSecret ? { Authorization: `Bearer ${adminSecret}` } : undefined,
-      });
+      const res = await fetch(`/api/admin/orders/${orderNumber}/verify-payment`, { method: 'PATCH' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast(
-          res.status === 403 && !adminSecret
-            ? 'Enter the admin key above before verifying a payment.'
-            : (data.error ?? 'Could not verify.'),
+          res.status === 403 ? 'Your session is not staff any more — sign in again.' : (data.error ?? 'Could not verify.'),
           'error',
         );
         return;
       }
-      setOrders((prev) => prev.map((o) => (o.orderNumber === orderNumber ? data.order : o)));
+      const updated = data.order as Order;
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.orderNumber === orderNumber
+            ? { ...updated, derivedStage: 'confirmed', routeGeometry: null }
+            : o,
+        ),
+      );
       toast(`${orderNumber} confirmed — the delivery plan and route were written.`, 'success');
+    } catch {
+      toast('The connection dropped — nothing was verified.', 'error');
     } finally {
       setVerifying(null);
     }
-  }, [adminSecret]);
+  }, []);
 
   const statusBadge = (status: OrderStatus | null | undefined, paymentStatus: PaymentStatus) => {
     const map: Record<string, { bg: string; color: string; label: string }> = {
@@ -177,8 +203,12 @@ export function AdminDash({
           <p className="eyebrow">Back of house</p>
           <h1 style={{ fontSize: 'var(--text-xl)' }}>Admin</h1>
         </div>
-        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' }}>
+          {demo ? <span className="badge badge--seasonal">demo mode</span> : null}
           <span className="badge badge--muted">{backend}</span>
+          <Button size="sm" variant="ghost" loading={refreshing} onClick={() => startRefresh(() => router.refresh())}>
+            Refresh
+          </Button>
           <Link href="/" className="btn btn--ghost btn--sm">
             ← Back to site
           </Link>
@@ -259,21 +289,6 @@ export function AdminDash({
           <EmptyState title="Nothing waiting." body="Every UPI transfer has been matched and confirmed." />
         ) : (
           <div className="stack">
-            <label className="stack-sm" style={{ maxWidth: '32ch' }}>
-              <span className="eyebrow">Admin key</span>
-              <input
-                type="password"
-                className="input"
-                value={adminSecret}
-                onChange={(e) => setAdminSecret(e.target.value)}
-                autoComplete="off"
-                placeholder="ADMIN_SECRET"
-              />
-              <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-                Confirming a payment moves money, so it is gated on the server&apos;s
-                ADMIN_SECRET. Held for this page only — never stored.
-              </span>
-            </label>
             <div className="table-scroll">
             <table className="table">
               <thead>
@@ -290,7 +305,7 @@ export function AdminDash({
                 {pending.map((o) => (
                   <tr key={o.id}>
                     <td className="mono">{o.orderNumber}</td>
-                    <td className="mono">{new Date(o.placedAt).toLocaleString('en-IN')}</td>
+                    <td className="mono">{when(o.placedAt)}</td>
                     <td>{o.guestEmail}</td>
                     <td className="mono">{o.upiTransactionRef ?? '—'}</td>
                     <td className="mono">{formatMoney(o.total)}</td>
@@ -368,14 +383,14 @@ export function AdminDash({
                 {sorted.map((o) => (
                   <tr key={o.id}>
                     <td className="mono" style={{ fontSize: 11 }}>{o.orderNumber}</td>
-                    <td className="mono" style={{ whiteSpace: 'nowrap' }}>{new Date(o.placedAt).toLocaleString('en-IN')}</td>
+                    <td className="mono" style={{ whiteSpace: 'nowrap' }}>{when(o.placedAt)}</td>
                     <td>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         <span>{o.guestName ?? '—'}</span>
                         <span className="muted" style={{ fontSize: 11 }}>{o.guestEmail ?? '—'}</span>
                       </div>
                     </td>
-                    <td>{statusBadge(o.derivedStage ?? o.status, o.paymentStatus)}</td>
+                    <td>{statusBadge(stageOf(o), o.paymentStatus)}</td>
                     <td>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         <span style={{ fontSize: 11, textTransform: 'capitalize' }}>{o.paymentMethod}</span>
@@ -396,7 +411,7 @@ export function AdminDash({
 
       {tab === 'reservations' ? (
         reservations.length === 0 ? (
-          <EmptyState title="No bookings." body="Slots are generated 21 days ahead." />
+          <EmptyState title="No bookings." body="Tables open fourteen days ahead, in thirty-minute slots." />
         ) : (
           <div className="table-scroll">
             <table className="table">
@@ -417,8 +432,21 @@ export function AdminDash({
                     <td className="mono">
                       {r.slot?.slotDate} {r.slot?.slotTime}
                     </td>
-                    <td>{r.store?.name}</td>
-                    <td>{r.guestName}</td>
+                    <td>
+                      {r.store?.name}
+                      {r.slot?.eventTitle ? (
+                        <span className="muted" style={{ display: 'block', fontSize: 11 }}>{r.slot.eventTitle}</span>
+                      ) : null}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <span>{r.guestName}</span>
+                        <span className="muted" style={{ fontSize: 11 }}>
+                          {r.guestEmail}
+                          {r.guestPhone ? ` · ${r.guestPhone}` : ''}
+                        </span>
+                      </div>
+                    </td>
                     <td className="mono">{r.partySize}</td>
                     <td>{r.status === 'booked' ? '✓ booked' : r.status}</td>
                   </tr>

@@ -114,9 +114,11 @@
   inset: 0;
   pointer-events: none;
   background: var(--roast-950);
-  /* Driven by the scrub's own --hero-progress. Opacity only: a compositor
-     operation, not a paint (§16.3). */
-  opacity: calc((var(--hero-progress, 0) - 0.86) * 7.1);
+  /* Written by the scrub straight onto this element's opacity — a compositor
+     operation, not a paint, and not an inherited custom property that
+     re-styles the whole hero subtree every frame (§16.3). */
+  opacity: 0;
+  will-change: opacity;
 }
 
 .hero__copy {
@@ -1155,6 +1157,21 @@ fieldset.builder-group {
 .account {
   padding-bottom: var(--space-8);
 }
+.account__head {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+.account-signin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+}
+.subscribe-card {
+  margin-top: var(--space-6);
+}
 .tier-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -1189,6 +1206,14 @@ fieldset.builder-group {
   display: grid;
   place-items: center;
   text-align: center;
+}
+
+/* ── Route loading ────────────────────────────────────────────────── */
+.route-loading {
+  min-height: 70svh;
+  display: grid;
+  place-items: center;
+  padding-top: var(--header-h);
 }
 
 /* ── Login ────────────────────────────────────────────────────────── */

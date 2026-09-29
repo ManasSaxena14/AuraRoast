@@ -34,7 +34,7 @@ async function main() {
         `  stores     ${STORES.length}`,
         `  guides     ${GUIDES.length}`,
         `  tiers      ${TIERS.length}`,
-        `  slots      ${STORES.length * slotTimesForDay().length} per day × 21 days from ${toDateKey(new Date())}`,
+        `  slots      ${STORES.length * slotTimesForDay().length} per day × 14 days from ${toDateKey(new Date())}`,
         '',
         'Set DATABASE_URL_UNPOOLED to seed a real Neon branch instead.',
       ].join('\n'),
@@ -42,13 +42,15 @@ async function main() {
     return;
   }
 
-  // Real Postgres path. `onConflictDoUpdate` on the natural key is what makes
-  // this idempotent — re-running it converges, it does not duplicate.
-  const { drizzle } = await import('drizzle-orm/neon-http');
-  const { neon } = await import('@neondatabase/serverless');
+  // Real Postgres path — the app's own client, so Neon goes over HTTP and any
+  // other Postgres over node-postgres. `onConflictDoNothing` on the natural
+  // key is what makes this idempotent: re-running it converges, it does not
+  // duplicate, and it never overwrites a price edited in the database.
+  const { connect } = await import('../src/repositories/client');
   const schema = await import('../src/repositories/schema');
 
-  const db = drizzle(neon(url));
+  const client = await connect(url);
+  const db = client.db;
 
   await db
     .insert(schema.origins)
@@ -155,6 +157,7 @@ async function main() {
     )
     .onConflictDoNothing({ target: schema.drinks.slug });
 
+  await client.close();
   console.log('Seed complete — re-running changes nothing.');
 }
 

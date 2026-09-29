@@ -1,9 +1,26 @@
-node_modules
-.next
-.data
-out
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Environment
 .env.local
 .env*.local
-*.tsbuildinfo
-next-env.d.ts
+
+# Data
+.data/
+
+# Build artifacts
+deliverables/
+
+# OS
 .DS_Store
+Thumbs.db
+
+# AI agent files (auto-generated, not project code)
+CLAUDE.md
+AGENTS.md

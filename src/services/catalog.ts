@@ -1,6 +1,5 @@
 import {
   catalogueMap,
-  getDrinkBySlug,
   getOrigin,
   listDrinks,
   listModifiers,
@@ -24,7 +23,9 @@ export async function getMenu() {
 }
 
 export async function getDrinkPage(slug: string) {
-  const drink = await getDrinkBySlug(slug);
+  // Drinks only: the sellable map also resolves pairings by slug, and a plate
+  // of biscotti rendered through the Brew Builder is not a page we have.
+  const drink = (await listDrinks()).find((d) => d.slug === slug);
   if (!drink) return null;
   const [modifiers, reviews, rating, origins] = await Promise.all([
     listModifiers(),

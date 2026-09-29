@@ -7,6 +7,7 @@
  *   2. placement is idempotency-key protected with three distinct outcomes
  *   3. the delivery plan and the OSRM route are written ONCE, at confirmation
  */
+import { after } from 'next/server';
 import { z } from 'zod';
 import {
   MAX_LINE_QUANTITY,
@@ -27,7 +28,7 @@ import {
 } from '@/domain/errors';
 import { hashPayload, uuid } from '@/lib/ids';
 import { fetchRoute } from '@/lib/osrm';
-import { haversine } from '@/lib/geo';
+import { haversine, syntheticBezier } from '@/lib/geo';
 import {
   accruePoints,
   catalogueMap,
@@ -37,7 +38,6 @@ import {
   getStore,
   insertOrder,
   listModifiers,
-  listOrders,
   releaseIdempotencyKey,
   updateOrder,
 } from '@/repositories';
@@ -56,7 +56,6 @@ export interface PlaceOrderInput {
   deliveryLng?: number | null;
   tip?: number;
   promoCode?: string | null;
-  userId?: string | null;
   /** Read only so we can log a mismatch. Never written. */
   clientClaimedTotal?: number;
 }
@@ -109,15 +108,22 @@ const inputSchema = z.object({
   addressLine: z.string().max(1000).nullish(),
   deliveryLat: z.number().min(-90).max(90).nullish(),
   deliveryLng: z.number().min(-180).max(180).nullish(),
-  tip: z.coerce.number().min(0).max(10_000_000).nullish(),
+  tip: z.coerce.number().int().min(0).max(1_000_000).nullish(),
   promoCode: z.string().max(100).nullish(),
-  userId: z.string().max(200).nullish(),
   clientClaimedTotal: z.number().optional(),
 });
 
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * `userId` is the SIGNED-IN guest, resolved from the session by the route —
+ * never read from the body. It used to be a body field, which let any caller
+ * pour loyalty points into any account by naming it.
+ */
 export async function placeOrder(
   raw: unknown,
   idempotencyKey: string | null,
+  userId: string | null = null,
 ): Promise<PlaceOrderResult> {
   if (!idempotencyKey) throw new MissingIdempotencyKeyError();
 
@@ -126,10 +132,14 @@ export async function placeOrder(
     throw new DomainError('That order could not be read.', 'invalid_body', 400, parsed.error.issues);
   }
   const input: PlaceOrderInput = parsed.data as unknown as PlaceOrderInput;
+  input.guestName = input.guestName.trim();
+  input.guestEmail = input.guestEmail.trim();
+  input.addressLine = input.addressLine?.trim() || null;
 
   if (!input.lines.length) throw new DomainError('Your cart is empty.', 'empty_cart', 400);
-  if (!input.guestEmail.includes('@')) {
-    throw new DomainError('A contact email is required.', 'invalid_email', 400);
+  if (!input.guestName) throw new DomainError('A name is required.', 'name_required', 400);
+  if (!EMAIL.test(input.guestEmail)) {
+    throw new DomainError('A valid contact email is required.', 'invalid_email', 400);
   }
   if (input.fulfillment === 'delivery' && !input.addressLine) {
     throw new DomainError('A delivery address is required.', 'address_required', 400);
@@ -157,7 +167,7 @@ export async function placeOrder(
     lng: input.deliveryLng ?? null,
     tip: input.tip ?? 0,
     promo: input.promoCode ?? null,
-    userId: input.userId ?? null,
+    userId,
   });
 
   const claim = await claimIdempotencyKey(idempotencyKey, requestHash);
@@ -218,7 +228,7 @@ export async function placeOrder(
     const id = uuid();
     const base: Omit<Order, 'orderNumber'> = {
       id,
-      userId: input.userId ?? null,
+      userId,
       guestName: input.guestName,
       guestEmail: input.guestEmail,
       guestPhone: input.guestPhone ?? null,
@@ -304,22 +314,67 @@ export async function getOrder(orderNumber: string): Promise<Order> {
   return order;
 }
 
+/**
+ * A confirmed order with no stored plan — one placed before plans were
+ * persisted, or whose routing write failed — would otherwise read as
+ * "Awaiting payment" forever. The plan is a pure function of the order (its
+ * id seeds the randomness, its confirmation time is the clock), so it is
+ * re-derived here, identically on every read, with a synthesized road.
+ */
+export async function withDerivedPlan(order: Order): Promise<Order> {
+  if (order.deliveryPlan || !order.confirmedAt) return order;
+  if (order.status === 'pending_payment' || order.status === 'cancelled') return order;
+  const store = order.storeId ? await getStore(order.storeId) : null;
+  if (!store) return order;
+  const from = { lat: store.lat, lng: store.lng };
+  const to =
+    order.fulfillment === 'delivery' && order.deliveryLat != null && order.deliveryLng != null
+      ? { lat: order.deliveryLat, lng: order.deliveryLng }
+      : { lat: store.lat + 0.028, lng: store.lng + 0.024 };
+  return {
+    ...order,
+    deliveryPlan: buildDeliveryPlan(
+      haversine(from, to),
+      seededRandom(order.id),
+      new Date(order.confirmedAt).getTime(),
+      order.fulfillment,
+    ),
+    routeGeometry: order.routeGeometry ?? syntheticBezier(from, to),
+    routeSource: order.routeSource ?? 'synthetic',
+  };
+}
+
+/** Run after the response is sent — and actually run: an unawaited promise in
+ *  a serverless function is frozen with the instance the moment it replies. */
+function afterResponse(task: () => Promise<unknown>) {
+  const safe = () => task().catch((err) => console.warn('after_response_failed', err));
+  try {
+    after(safe);
+  } catch {
+    // Outside a request scope (a script, a test) there is nothing to defer to.
+    void safe();
+  }
+}
+
 /** The tracking payload. Pure derivation — no writes on the read path. */
 export async function trackOrder(orderNumber: string, now = Date.now()) {
-  const order = await getOrder(orderNumber);
+  const order = await withDerivedPlan(await getOrder(orderNumber));
   const state = deriveTrackingState(order, now);
 
   // Lazily written back for admin list views. NEVER authoritative (§7.4).
   if (state.currentStage !== order.derivedStage && order.status !== 'cancelled') {
-    void updateOrder(orderNumber, { derivedStage: state.currentStage });
+    afterResponse(() => updateOrder(orderNumber, { derivedStage: state.currentStage }));
   }
 
   const store = order.storeId ? await getStore(order.storeId) : null;
   return { order, state, store };
 }
 
+const OPEN_STATUSES = ['pending_payment', 'confirmed', 'preparing'] as const;
+
 export async function cancelOrder(orderNumber: string): Promise<Order> {
-  const order = await getOrder(orderNumber);
+  const order = await withDerivedPlan(await getOrder(orderNumber));
+  if (order.status === 'cancelled') return order;
 
   // The live stage, not the stored column, decides whether cancelling is legal.
   const live = deriveTrackingState(order, Date.now());
@@ -334,11 +389,17 @@ export async function cancelOrder(orderNumber: string): Promise<Order> {
   }
   assertTransition(effective, 'cancelled');
 
-  const updated = await updateOrder(orderNumber, {
-    status: 'cancelled',
-    cancelledAt: new Date().toISOString(),
-  });
-  return updated!;
+  // Guarded: if an admin verified it or another tab cancelled it in between,
+  // the write matches no row instead of clobbering that change.
+  const updated = await updateOrder(
+    orderNumber,
+    { status: 'cancelled', cancelledAt: new Date().toISOString() },
+    { status: [...OPEN_STATUSES] },
+  );
+  if (updated) return updated;
+  const now = await getOrder(orderNumber);
+  if (now.status === 'cancelled') return now;
+  throw new DomainError('That order changed while cancelling — reload and try again.', 'conflict', 409);
 }
 
 /** The ONLY path that confirms a UPI order (§8.4). Admin-only, re-verified. */
@@ -351,27 +412,35 @@ export async function verifyUpiPayment(orderNumber: string, adminId: string): Pr
   assertTransition(order.status, 'confirmed');
 
   const now = new Date().toISOString();
-  let updated = (await updateOrder(orderNumber, {
-    paymentStatus: 'verified',
-    status: 'confirmed',
-    confirmedAt: now,
-    verifiedAt: now,
-  }))!;
+  // Two admins pressing Verify at once must confirm it — and accrue points —
+  // exactly once. Only the write that finds it still pending wins.
+  const verified = await updateOrder(
+    orderNumber,
+    { paymentStatus: 'verified', status: 'confirmed', confirmedAt: now, verifiedAt: now },
+    { status: ['pending_payment'], paymentStatus: ['pending'] },
+  );
+  if (!verified) {
+    const current = await getOrder(orderNumber);
+    if (current.paymentStatus === 'verified') return current;
+    throw new DomainError(`That order is ${current.status.replace(/_/g, ' ')} now.`, 'conflict', 409);
+  }
 
-  updated = (await attachDeliveryPlan(updated)) ?? updated;
-  if (updated.userId) {
-    await accruePoints(updated.userId, pointsForOrder(updated.total), `Order ${orderNumber}`, updated.id);
+  const routed = (await attachDeliveryPlan(verified)) ?? verified;
+  if (routed.userId) {
+    await accruePoints(routed.userId, pointsForOrder(routed.total), `Order ${orderNumber}`, routed.id);
   }
   void adminId;
-  return updated;
+  return routed;
 }
 
 export async function attachUtr(orderNumber: string, utr: string): Promise<Order> {
-  const updated = await updateOrder(orderNumber, { upiTransactionRef: utr.trim() });
-  if (!updated) throw new NotFoundError('Order');
+  const updated = await updateOrder(
+    orderNumber,
+    { upiTransactionRef: utr.trim() },
+    { paymentStatus: ['pending'] },
+  );
+  if (!updated) {
+    throw new DomainError('That payment has already been settled.', 'not_pending', 409);
+  }
   return updated;
-}
-
-export async function recentOrders(userId?: string) {
-  return listOrders({ userId, limit: 20 });
 }

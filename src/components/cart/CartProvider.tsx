@@ -17,7 +17,32 @@ import {
   type ReactNode,
 } from 'react';
 import { priceCart, findPromo, buildModifierIndex } from '@/domain/pricing';
+import { PAIRINGS } from '@/data/pairings';
 import type { CartLine, Drink, Modifier, PricedCart, SelectedModifier } from '@/domain/types';
+
+/** Pairings sell through the same cart and the same pricing function. */
+const PAIRING_ITEMS: Drink[] = PAIRINGS.map((p) => ({
+  id: p.id,
+  slug: p.slug,
+  name: p.name,
+  category: 'pairings',
+  originId: null,
+  roast: null,
+  description: p.description,
+  longDescription: p.pairingNote,
+  tastingNotes: [],
+  allergens: p.allergens,
+  caffeineMg: 0,
+  basePrice: p.price,
+  imageUrl: p.imageUrl,
+  isSeasonal: false,
+  isAvailable: p.isAvailable,
+  isIced: false,
+  intensity: 0,
+  sortOrder: 200 + p.sortOrder,
+  allowedModifiers: [],
+  defaultModifiers: {},
+}));
 
 const STORAGE_KEY = 'aura-toast.cart.v3';
 
@@ -67,6 +92,16 @@ export function CartProvider({
   const [isOpen, setIsOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
+  const catalogueMap = useMemo(() => {
+    const map = new Map<string, Drink>();
+    for (const d of [...catalogue, ...PAIRING_ITEMS]) {
+      map.set(d.id, d);
+      map.set(d.slug, d);
+    }
+    for (const p of PAIRING_ITEMS) map.set(`pairing-${p.id}`, p);
+    return map;
+  }, [catalogue]);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -77,8 +112,23 @@ export function CartProvider({
           promoCode?: string | null;
           tip?: number;
         };
-        if (parsed.lines) setLines(parsed.lines);
-        if (parsed.fulfillment) setFulfillment(parsed.fulfillment);
+        if (Array.isArray(parsed.lines)) {
+          // A cart saved under an older id scheme (the database UUIDs this
+          // site briefly handed out) is re-pointed by slug rather than priced
+          // at zero and dropped at checkout.
+          setLines(
+            parsed.lines
+              .filter((l) => l && typeof l.drinkId === 'string' && l.quantity > 0)
+              .map((l) => {
+                if (catalogueMap.has(l.drinkId)) return l;
+                const bySlug = catalogueMap.get(l.slug);
+                return bySlug ? { ...l, drinkId: bySlug.id } : l;
+              }),
+          );
+        }
+        if (parsed.fulfillment === 'delivery' || parsed.fulfillment === 'pickup') {
+          setFulfillment(parsed.fulfillment);
+        }
         if (parsed.promoCode !== undefined) setPromoCode(parsed.promoCode);
         if (typeof parsed.tip === 'number') setTip(parsed.tip);
       }
@@ -86,6 +136,8 @@ export function CartProvider({
       /* a corrupt cart is not worth a crash */
     }
     setHydrated(true);
+    // Hydrate once, against the catalogue the page arrived with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -97,43 +149,6 @@ export function CartProvider({
     }
   }, [lines, fulfillment, promoCode, tip, hydrated]);
 
-  const catalogueMap = useMemo(() => {
-    const map = new Map<string, Drink>(catalogue.map((d) => [d.id, d]));
-    for (const d of catalogue) {
-      map.set(d.slug, d);
-    }
-    // Lazy import or static data inclusion of pairings for instant client-side pricing
-    import('@/data/pairings').then(({ PAIRINGS }) => {
-      for (const p of PAIRINGS) {
-        const item: Drink = {
-          id: p.id,
-          slug: p.slug,
-          name: p.name,
-          category: 'pairings',
-          originId: null,
-          roast: null,
-          description: p.description,
-          longDescription: p.pairingNote,
-          tastingNotes: [],
-          allergens: p.allergens,
-          caffeineMg: 0,
-          basePrice: p.price,
-          imageUrl: p.imageUrl,
-          isSeasonal: false,
-          isAvailable: p.isAvailable,
-          isIced: false,
-          intensity: 0,
-          sortOrder: 200 + p.sortOrder,
-          allowedModifiers: [],
-          defaultModifiers: {},
-        };
-        map.set(p.id, item);
-        map.set(p.slug, item);
-        map.set(`pairing-${p.id}`, item);
-      }
-    });
-    return map;
-  }, [catalogue]);
   const modifierIndex = useMemo(() => buildModifierIndex(modifiers), [modifiers]);
 
   const priced = useMemo(
@@ -216,26 +231,35 @@ export function CartProvider({
     setTip(0);
   }, []);
 
-  const value: CartContextValue = {
-    lines,
-    priced,
-    fulfillment,
-    promoCode,
-    tip,
-    count: lines.reduce((a, l) => a + l.quantity, 0),
-    isOpen,
-    hydrated,
-    add,
-    addLine,
-    setQuantity,
-    remove,
-    clear,
-    setFulfillment,
-    setPromoCode,
-    setTip,
-    open: () => setIsOpen(true),
-    close: () => setIsOpen(false),
-  };
+  const open = useCallback(() => setIsOpen(true), []);
+  const close = useCallback(() => setIsOpen(false), []);
+
+  // Memoised: the provider sits at the root and re-renders with every
+  // navigation's new children, which would otherwise hand every consumer —
+  // the header included — a new object and a re-render each time.
+  const value = useMemo<CartContextValue>(
+    () => ({
+      lines,
+      priced,
+      fulfillment,
+      promoCode,
+      tip,
+      count: lines.reduce((a, l) => a + l.quantity, 0),
+      isOpen,
+      hydrated,
+      add,
+      addLine,
+      setQuantity,
+      remove,
+      clear,
+      setFulfillment,
+      setPromoCode,
+      setTip,
+      open,
+      close,
+    }),
+    [lines, priced, fulfillment, promoCode, tip, isOpen, hydrated, add, addLine, setQuantity, remove, clear, open, close],
+  );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

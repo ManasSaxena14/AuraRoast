@@ -39,7 +39,13 @@ export function MenuBrowser({ drinks }: { drinks: Drink[] }) {
   }, [drinks, category, search]);
 
   useEffect(() => {
-    const onScroll = () => setShrunk(window.scrollY > 120);
+    let last: boolean | null = null;
+    const onScroll = () => {
+      const next = window.scrollY > 120;
+      if (next === last) return; // one render per threshold crossing, not per frame
+      last = next;
+      setShrunk(next);
+    };
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
@@ -108,9 +114,21 @@ export function MenuBrowser({ drinks }: { drinks: Drink[] }) {
     gsap.fromTo(
       cards,
       { opacity: 0, y: 12 },
-      { opacity: 1, y: 0, duration: 0.24, ease: EASE.aura, stagger: 0.02, overwrite: true },
+      {
+        opacity: 1,
+        y: 0,
+        duration: 0.24,
+        ease: EASE.aura,
+        stagger: 0.02,
+        overwrite: true,
+        clearProps: 'opacity,transform',
+      },
     );
-    ScrollTrigger.refresh();
+    // The grid's height changed, so trigger positions below it did too — but
+    // a refresh re-measures every trigger on the page, so it waits until the
+    // typing stops instead of running on every keystroke.
+    const t = setTimeout(() => ScrollTrigger.refresh(), 220);
+    return () => clearTimeout(t);
   }, [category, search]);
 
   return (

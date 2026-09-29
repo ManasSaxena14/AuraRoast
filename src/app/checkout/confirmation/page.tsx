@@ -1,10 +1,12 @@
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { getOrderByNumber } from '@/repositories';
 import { upiPayload } from '@/services/payment';
+import { normaliseOrderNumber } from '@/lib/ids';
+import { getViewer, ownsOrder, publicOrderView } from '@/lib/session';
 import { Confirmation } from '@/components/checkout/Confirmation';
 
-export const metadata: Metadata = { title: 'Order confirmed' };
+export const metadata: Metadata = { title: 'Order confirmed', robots: { index: false } };
 export const dynamic = 'force-dynamic';
 
 export default async function ConfirmationPage({
@@ -12,15 +14,16 @@ export default async function ConfirmationPage({
 }: {
   searchParams: Promise<{ order?: string }>;
 }) {
-  const { order: orderNumber } = await searchParams;
-  if (!orderNumber) redirect('/menu');
+  const { order: raw } = await searchParams;
+  if (!raw) redirect('/menu');
 
-  let order = await getOrderByNumber(orderNumber);
-  if (!order) {
-    await new Promise((r) => setTimeout(r, 600));
-    order = await getOrderByNumber(orderNumber);
-  }
-  if (!order) redirect(`/track/${orderNumber}`);
+  // Postgres is the source of truth and the write committed before checkout
+  // navigated here, so there is nothing to wait for and retry.
+  const [order, viewer] = await Promise.all([
+    getOrderByNumber(normaliseOrderNumber(raw)),
+    getViewer(),
+  ]);
+  if (!order) notFound();
 
   let qrSvg: string | null = null;
   let upi: { uri: string; upiId: string; payeeName: string } | null = null;
@@ -37,5 +40,12 @@ export default async function ConfirmationPage({
     });
   }
 
-  return <Confirmation order={order} upi={upi} qrSvg={qrSvg} />;
+  return (
+    <Confirmation
+      order={publicOrderView(order)}
+      upi={upi}
+      qrSvg={qrSvg}
+      ownedBySession={ownsOrder(viewer, order)}
+    />
+  );
 }

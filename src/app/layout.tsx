@@ -7,6 +7,7 @@ import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { BackToTop } from '@/components/layout/BackToTop';
 import { PageTransition } from '@/components/motion/PageTransition';
+import { features } from '@/config/env';
 import { listDrinks, listModifiers } from '@/repositories';
 
 export const metadata: Metadata = {
@@ -29,6 +30,13 @@ export const metadata: Metadata = {
   },
   manifest: '/site.webmanifest',
 };
+
+/**
+ * Every prerendered page re-renders in the background at most every five
+ * minutes, so a price or a sold-out flag changed in the database reaches the
+ * menu, the home page and the cart's pricing without a redeploy.
+ */
+export const revalidate = 300;
 
 export const viewport: Viewport = {
   themeColor: '#120D0A',
@@ -61,7 +69,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         </a>
         <div className="grain" aria-hidden="true" />
 
-        <AppProviders drinks={drinks} modifiers={modifiers}>
+        <AppProviders drinks={drinks} modifiers={modifiers} authEnabled={features.googleAuth}>
           {/* Header, cart drawer and Barista live OUTSIDE <PageTransition> —
               they persist across navigation and are never snapshotted (§13.3). */}
           <Header />

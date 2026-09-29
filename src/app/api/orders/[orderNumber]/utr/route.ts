@@ -2,20 +2,15 @@ import { attachUtr } from '@/services/order';
 import { getOrderByNumber } from '@/repositories';
 import { isPlausibleUtr } from '@/lib/upi';
 import { DomainError, NotFoundError } from '@/domain/errors';
-import { fail, ok, provesContact, rateLimit } from '@/lib/http';
+import { fail, mayManageOrder, ok, rateLimit, readJson } from '@/lib/http';
+import { getViewer, publicOrderView } from '@/lib/session';
 
 export const runtime = 'nodejs';
 
 /**
- * Attach the guest's UPI transaction reference to their own order.
- *
- * `attachUtr` existed in the service layer with nothing calling it, so the
- * confirmation screen fired a GET it discarded and then claimed "Reference
- * noted" — the reference was never stored. This is that missing endpoint.
- *
- * Guarded by the same `X-Aura-Contact` proof as the other order routes, and
- * 404s rather than 403s on a bad proof so sequential order numbers stay
- * unenumerable.
+ * Attach the guest's UPI transaction reference to their own order, so the
+ * person verifying transfers can match it. Guarded like every other write on
+ * an order: the checkout contact, or the signed-in owner.
  */
 export async function PATCH(req: Request, { params }: { params: Promise<{ orderNumber: string }> }) {
   const limited = await rateLimit(req, 'utr', 10, 60_000);
@@ -24,23 +19,21 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ orderN
   try {
     const { orderNumber } = await params;
 
-    let body: unknown;
-    try {
-      body = await req.json();
-    } catch {
-      throw new DomainError('Malformed JSON body.', 'invalid_json', 400);
-    }
-    const utr = (body as { utr?: unknown })?.utr;
+    const body = await readJson(req);
+    const utr = (body as { utr?: unknown } | null)?.utr;
     if (typeof utr !== 'string' || !isPlausibleUtr(utr)) {
       throw new DomainError('A UTR is 12 digits, from your UPI app.', 'invalid_utr', 400);
     }
 
-    const existing = await getOrderByNumber(orderNumber);
-    if (!existing || !provesContact(req, existing.guestEmail, existing.guestPhone)) {
+    const [existing, viewer] = await Promise.all([getOrderByNumber(orderNumber), getViewer()]);
+    if (!existing || !mayManageOrder(req, existing, viewer)) {
       throw new NotFoundError('Order');
     }
+    if (existing.paymentMethod !== 'upi') {
+      throw new DomainError('That order is not paid by UPI.', 'not_upi', 409);
+    }
 
-    return ok({ order: await attachUtr(orderNumber, utr) });
+    return ok({ order: publicOrderView(await attachUtr(orderNumber, utr)) });
   } catch (err) {
     return fail(err);
   }

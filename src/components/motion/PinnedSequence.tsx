@@ -26,15 +26,29 @@ export interface Beat {
   body: string;
 }
 
+const RING = 295.3; // 2πr for r = 47
+
 export function PinnedSequence({ beats, eyebrow, heading }: { beats: Beat[]; eyebrow: string; heading: string }) {
   const ref = useRef<HTMLElement>(null);
+  const ringRef = useRef<SVGCircleElement>(null);
   const [active, setActive] = useState(0);
-  const [progress, setProgress] = useState(0);
+  const activeRef = useRef(0);
 
+  /**
+   * Called on every scroll frame while pinned. The ring is written straight to
+   * the DOM, and React only hears about it when the BEAT changes — six renders
+   * across the whole sequence instead of one per frame (a re-render of six
+   * images and six captions, sixty times a second, was most of this
+   * section's cost).
+   */
   const onUpdate = useCallback(
     (p: number) => {
-      setProgress(p);
-      setActive(Math.min(beats.length - 1, Math.floor(p * beats.length)));
+      ringRef.current?.setAttribute('stroke-dashoffset', String(RING * (1 - p)));
+      const next = Math.min(beats.length - 1, Math.floor(p * beats.length));
+      if (next !== activeRef.current) {
+        activeRef.current = next;
+        setActive(next);
+      }
     },
     [beats.length],
   );
@@ -58,8 +72,9 @@ export function PinnedSequence({ beats, eyebrow, heading }: { beats: Beat[]; eye
               if (!entry.isIntersecting) continue;
               const i = nodes.indexOf(entry.target as HTMLElement);
               if (i < 0) continue;
+              activeRef.current = i;
               setActive(i);
-              setProgress((i + 1) / nodes.length);
+              ringRef.current?.setAttribute('stroke-dashoffset', String(RING * (1 - (i + 1) / nodes.length)));
             }
           },
           // A band across the middle of the screen, so the beat that "counts"
@@ -133,6 +148,7 @@ export function PinnedSequence({ beats, eyebrow, heading }: { beats: Beat[]; eye
                 <svg viewBox="0 0 100 100">
                   <circle cx="50" cy="50" r="47" fill="none" stroke="var(--aura-500)" strokeWidth="0.6" opacity="0.25" />
                   <circle
+                    ref={ringRef}
                     cx="50"
                     cy="50"
                     r="47"
@@ -140,8 +156,8 @@ export function PinnedSequence({ beats, eyebrow, heading }: { beats: Beat[]; eye
                     stroke="var(--aura-500)"
                     strokeWidth="0.9"
                     strokeLinecap="round"
-                    strokeDasharray={295.3}
-                    strokeDashoffset={295.3 * (1 - progress)}
+                    strokeDasharray={RING}
+                    strokeDashoffset={RING}
                     transform="rotate(-90 50 50)"
                   />
                 </svg>

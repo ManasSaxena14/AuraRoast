@@ -228,14 +228,24 @@ ol {
   flex-wrap: wrap;
 }
 
+/* Film grain over the whole viewport.
+
+   It used to be `mix-blend-mode: overlay`. A blend mode on a fixed,
+   full-screen layer means the compositor re-blends it against everything
+   beneath it on EVERY scroll frame — the single most expensive thing on the
+   page, and the main reason scrolling the home page stuttered. At 3% the
+   overlay maths is indistinguishable from a plain translucent layer of
+   grey noise, so it is now exactly that: rasterised once, on its own
+   compositor layer, and never repainted. */
 .grain {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 1;
-  opacity: 0.035;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.03;
+  transform: translateZ(0);
+  contain: strict;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 /* Section divider — a hairline that fades from the centre outward */

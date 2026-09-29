@@ -13,6 +13,14 @@ import { Rating, SectionHead } from '@/components/ui/bits';
 import { ReviewList } from '@/components/menu/ReviewList';
 import { OriginMini } from '@/components/menu/OriginMini';
 import { PairingsSection } from '@/components/menu/PairingsSection';
+import { SubscribeCard } from '@/components/menu/SubscribeCard';
+
+/**
+ * Prerendered, then refreshed in the background every five minutes — so a
+ * price or availability change made in the database reaches the page without
+ * a redeploy. A new review revalidates its own page immediately.
+ */
+export const revalidate = 300;
 
 export async function generateStaticParams() {
   const drinks = await listDrinks();
@@ -96,6 +104,9 @@ export default async function DrinkPage({ params }: { params: Promise<{ drinkId:
           </header>
 
           <BrewBuilder drink={drink} modifiers={modifiers} defaults={defaults} />
+          {drink.category === 'beans' && drink.isAvailable ? (
+            <SubscribeCard drinkId={drink.id} drinkName={drink.name} slug={drink.slug} />
+          ) : null}
         </div>
       </div>
 

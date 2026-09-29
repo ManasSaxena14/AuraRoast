@@ -32,6 +32,8 @@ const schema = z.object({
   CRON_SECRET: z.string().optional(),
   /* Gates the one route that can confirm a UPI order. Unset DENIES (§5.4). */
   ADMIN_SECRET: z.string().optional(),
+  /* Comma-separated Google account emails allowed into /admin. Unset DENIES. */
+  ADMIN_EMAILS: z.string().optional(),
   /* Opt in ONLY behind a proxy that OVERWRITES x-forwarded-for. Left unset,
      every caller shares one rate-limit bucket — see clientKey in lib/http.ts. */
   TRUST_PROXY_HEADERS: z.string().optional(),
@@ -49,6 +51,27 @@ export const env = parsed.data;
 
 export const features = {
   postgres: Boolean(env.DATABASE_URL),
-  googleAuth: Boolean(env.AUTH_GOOGLE_ID && env.AUTH_GOOGLE_SECRET),
+  // Auth.js refuses every request without a secret (MissingSecret), so all
+  // three have to be present before the sign-in button may be offered.
+  googleAuth: Boolean(env.AUTH_GOOGLE_ID && env.AUTH_GOOGLE_SECRET && env.AUTH_SECRET),
   groq: Boolean(env.GROQ_API_KEY),
 } as const;
+
+/**
+ * Zero-config local development: with no Google credentials there is nobody
+ * to sign in as, so /account shows the demo profile and /admin is open. This
+ * can never be true in production — a deploy that forgot its auth variables
+ * must lock the back office, not publish it.
+ */
+export const demoMode = !features.googleAuth && env.NODE_ENV !== 'production';
+
+const adminEmails = new Set(
+  (env.ADMIN_EMAILS ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+export function isAdminEmail(email: string | null | undefined): boolean {
+  return !!email && adminEmails.has(email.trim().toLowerCase());
+}

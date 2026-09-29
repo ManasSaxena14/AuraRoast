@@ -7,7 +7,7 @@
  * under `--ease-scrub`, and each marker lights up as the line reaches it —
  * so the graph is explaining itself in the order a roaster would explain it.
  */
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { DrawPath } from '@/components/motion/DrawPath';
 import { Reveal } from '@/components/motion/Reveal';
 
@@ -19,7 +19,12 @@ const MARKERS = [
 ];
 
 export function RoastCurve() {
-  const [progress, setProgress] = useState(0);
+  // How many markers the line has reached — the only thing the chart needs
+  // from the scroll. Four possible changes, instead of a render per percent.
+  const [lit, setLit] = useState(0);
+  const onProgress = useCallback((p: number) => {
+    setLit(MARKERS.filter((m) => p >= m.at).length);
+  }, []);
 
   return (
     <div className="roast">
@@ -32,7 +37,7 @@ export function RoastCurve() {
         </p>
       </Reveal>
 
-      <DrawPath className="roast__chart" start="top 78%" end="bottom 62%" onProgress={setProgress}>
+      <DrawPath className="roast__chart" start="top 78%" end="bottom 62%" onProgress={onProgress}>
         <svg viewBox="0 0 700 260" role="img" aria-label="A roast profile: bean temperature rising from charge through drying and first crack to the drop at nine minutes forty.">
           <defs>
             <linearGradient id="roastFade" x1="0" y1="0" x2="1" y2="0">
@@ -58,8 +63,8 @@ export function RoastCurve() {
             strokeLinecap="round"
           />
 
-          {MARKERS.map((m) => {
-            const on = progress >= m.at;
+          {MARKERS.map((m, i) => {
+            const on = i < lit;
             return (
               <g key={m.label} opacity={on ? 1 : 0.28} style={{ transition: 'opacity var(--dur-md) var(--ease-aura)' }}>
                 <line x1={m.x} y1={m.y} x2={m.x} y2="238" stroke="var(--aura-500)" strokeWidth="0.6" opacity="0.4" />
@@ -76,8 +81,8 @@ export function RoastCurve() {
       </DrawPath>
 
       <div className="roast__legend">
-        {MARKERS.map((m) => (
-          <div key={m.label} className="roast__legend-item" data-on={progress >= m.at || undefined}>
+        {MARKERS.map((m, i) => (
+          <div key={m.label} className="roast__legend-item" data-on={i < lit || undefined}>
             <strong className="mono">{m.label}</strong>
             <span className="muted">{m.detail}</span>
           </div>

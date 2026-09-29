@@ -6,15 +6,19 @@ export const runtime = 'nodejs';
 
 /**
  * Postgres has no TTL indexes (§4.3). Expiry is a daily sweep: two
- * `DELETE ... WHERE expires_at < now()` statements, run from Vercel Cron.
+ * `DELETE ... WHERE expires_at < now()` statements.
+ *
+ * Vercel Cron calls the path with GET and `Authorization: Bearer $CRON_SECRET`;
+ * POST stays for anything else that schedules it. An unset CRON_SECRET denies.
  */
-export async function POST(req: Request) {
+async function sweep(req: Request) {
   try {
-    // `env.CRON_SECRET && ...` skipped the check whenever the variable was
-    // absent, so a deploy that forgot to set it published a destructive sweep.
     requireBearer(req, env.CRON_SECRET, 'cron');
     return ok({ swept: await sweepExpired() });
   } catch (err) {
     return fail(err);
   }
 }
+
+export const GET = sweep;
+export const POST = sweep;

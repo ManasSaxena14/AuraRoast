@@ -8,9 +8,10 @@
  * goes through one atomic statement, so two guests racing for the last seat
  * cannot both win. The 409 you may see here is that guard doing its job.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { SessionContext } from 'next-auth/react';
 import { formatMoney } from '@/domain/money';
-import { MAX_PARTY_SIZE, bookableDates } from '@/domain/slots';
+import { MAX_PARTY_SIZE, bookableDates, dateKeyToUtc } from '@/domain/slots';
 import { Reveal } from '@/components/motion/Reveal';
 import { Halo } from '@/components/motion/Halo';
 import { Button } from '@/components/ui/Button';
@@ -67,7 +68,23 @@ export function Reserve({ stores }: { stores: Store[] }) {
   const [confirmed, setConfirmed] = useState<Reservation | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  /* Signed in: name and email go in once, and stay editable. */
+  const session = useContext(SessionContext);
+  const prefilled = useRef(false);
   useEffect(() => {
+    const user = session?.status === 'authenticated' ? session.data?.user : null;
+    if (!user || prefilled.current) return;
+    prefilled.current = true;
+    if (user.name) setName((v) => v || user.name || '');
+    if (user.email) setEmail((v) => v || user.email || '');
+  }, [session]);
+
+  useEffect(() => {
+    // The shop's (IST) calendar, whatever zone this phone is set to — the
+    // server generates slots on the same one.
     const next = bookableDates(new Date(), 14);
     setDates(next);
     setDate(next[0]);
@@ -78,22 +95,40 @@ export function Reserve({ stores }: { stores: Store[] }) {
     let cancelled = false;
     setSlots(null);
     setSelected(null);
+    setLoadFailed(false);
     (async () => {
-      const res = await fetch(`/api/reservations/availability?storeId=${storeId}&date=${date}`);
-      const data = await res.json();
-      if (!cancelled) setSlots(data.slots ?? []);
+      try {
+        const res = await fetch(
+          `/api/reservations/availability?storeId=${encodeURIComponent(storeId)}&date=${date}`,
+        );
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json();
+        if (!cancelled) setSlots(data.slots ?? []);
+      } catch {
+        // A grid that stays a skeleton forever reads as "still loading".
+        if (!cancelled) {
+          setSlots([]);
+          setLoadFailed(true);
+        }
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [storeId, date]);
+  }, [storeId, date, reloadKey]);
 
   useEffect(() => {
     if (tab !== 'event' || events) return;
     (async () => {
-      const res = await fetch('/api/reservations/availability?type=event');
-      const data = await res.json();
-      setEvents(data.events ?? []);
+      try {
+        const res = await fetch('/api/reservations/availability?type=event');
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json();
+        setEvents(data.events ?? []);
+      } catch {
+        setEvents([]);
+        setLoadFailed(true);
+      }
     })();
   }, [tab, events]);
 
@@ -121,10 +156,10 @@ export function Reserve({ stores }: { stores: Store[] }) {
           // 409 here is the atomic capacity check refusing to overbook (§9.2).
           setError(data.error ?? 'That did not go through.');
           toast(data.error ?? 'That slot just went.', 'error');
-          // Re-read availability so the grid tells the truth immediately.
-          const fresh = await fetch(`/api/reservations/availability?storeId=${storeId}&date=${date}`);
-          setSlots((await fresh.json()).slots ?? []);
+          // Re-read availability so the list tells the truth immediately.
           setSelected(null);
+          if (tab === 'event') setEvents(null);
+          else setReloadKey((k) => k + 1);
           return;
         }
         setConfirmed(data.reservation);
@@ -136,17 +171,27 @@ export function Reserve({ stores }: { stores: Store[] }) {
         setBusy(false);
       }
     },
-    [selected, name, email, phone, partySize, notes, storeId, date],
+    [selected, name, email, phone, partySize, notes, tab],
   );
 
   if (confirmed) {
+    const isEvent = confirmed.slot?.type === 'event';
+    const day = confirmed.slot
+      ? dateKeyToUtc(confirmed.slot.slotDate).toLocaleDateString('en-IN', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          timeZone: 'UTC',
+        })
+      : '';
     return (
       <div className="stack" style={{ alignItems: 'center', textAlign: 'center', paddingBlock: 'var(--space-9)' }}>
         <Halo size={140} stroke={2} progress={1} label="Reservation confirmed" />
-        <h2>Table held.</h2>
+        <h2>{isEvent ? 'Your place is held.' : 'Table held.'}</h2>
         <p className="lede" style={{ marginInline: 'auto' }}>
           {confirmed.guestName}, {confirmed.partySize} {confirmed.partySize === 1 ? 'person' : 'people'} —{' '}
-          {confirmed.slot?.slotDate} at {confirmed.slot?.slotTime}, {confirmed.store?.name}.
+          {isEvent && confirmed.slot?.eventTitle ? `${confirmed.slot.eventTitle}, ` : ''}
+          {day} at {confirmed.slot?.slotTime}, {confirmed.store?.name}.
         </p>
         <p className="mono" style={{ fontSize: 'var(--text-xl)', color: 'var(--aura-500)' }}>
           {confirmed.reference}
@@ -214,7 +259,7 @@ export function Reserve({ stores }: { stores: Store[] }) {
                       />
                     ))
                   : dates.map((d) => {
-                      const dd = new Date(`${d}T00:00:00`);
+                      const dd = dateKeyToUtc(d);
                       return (
                         <button
                           key={d}
@@ -225,9 +270,9 @@ export function Reserve({ stores }: { stores: Store[] }) {
                           data-selected={d === date || undefined}
                           onClick={() => setDate(d)}
                         >
-                          <small>{dd.toLocaleDateString('en-IN', { weekday: 'short' })}</small>
-                          {dd.getDate()}
-                          <small>{dd.toLocaleDateString('en-IN', { month: 'short' })}</small>
+                          <small>{dd.toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'UTC' })}</small>
+                          {dd.getUTCDate()}
+                          <small>{dd.toLocaleDateString('en-IN', { month: 'short', timeZone: 'UTC' })}</small>
                         </button>
                       );
                     })}
@@ -243,7 +288,19 @@ export function Reserve({ stores }: { stores: Store[] }) {
                   ))}
                 </div>
               ) : slots.length === 0 ? (
-                <EmptyState title="Nothing that day." body="Try another date, or another room." />
+                loadFailed ? (
+                  <div className="stack-sm" style={{ alignItems: 'flex-start' }}>
+                    <p className="field__error">
+                      <span aria-hidden="true">⚠</span>
+                      The slots did not load. Nothing is wrong with your booking.
+                    </p>
+                    <Button size="sm" onClick={() => setReloadKey((k) => k + 1)}>
+                      Try again
+                    </Button>
+                  </div>
+                ) : (
+                  <EmptyState title="Nothing that day." body="Try another date, or another room." />
+                )
               ) : (
                 <Reveal key={`${storeId}-${date}`} variant="stagger" stagger={0.012} className="slot-grid">
                   {slots.map((s) => (
@@ -301,10 +358,11 @@ export function Reserve({ stores }: { stores: Store[] }) {
                       </span>
                     </div>
                     <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>
-                      {new Date(`${ev.date}T${ev.time}`).toLocaleDateString('en-IN', {
+                      {dateKeyToUtc(ev.date).toLocaleDateString('en-IN', {
                         weekday: 'long',
                         day: 'numeric',
                         month: 'long',
+                        timeZone: 'UTC',
                       })}{' '}
                       at {ev.time} · {ev.store?.name}
                     </p>

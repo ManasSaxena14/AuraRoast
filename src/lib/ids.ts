@@ -43,3 +43,31 @@ export async function hashPayload(payload: unknown): Promise<string> {
 export function reservationReference(): string {
   return `AT-R${shortCode(5)}`;
 }
+
+/**
+ * `AT-7K3M9Q` — random, not sequential.
+ *
+ * A counter held in process memory restarts at the same value on every cold
+ * serverless instance, so two instances handed out the same number and the
+ * second order overwrote the first. Sequential numbers were also the only
+ * thing standing between a stranger and every tracking page. 32^6 ≈ 1.07
+ * billion codes: unguessable in practice, and a collision is caught by the
+ * unique index and retried.
+ */
+export function orderNumber(): string {
+  return `AT-${shortCode(6)}`;
+}
+
+/** What a guest types: `7k3m9q`, `at7k3m9q`, `AT-7K3M9Q`, or a legacy `1042`. */
+export function normaliseOrderNumber(raw: string): string {
+  const value = raw.trim().toUpperCase().replace(/[\s–—]+/g, '');
+  if (/^\d{1,6}$/.test(value)) return `AT-${value.padStart(6, '0')}`;
+  const bare = value.replace(/^AT-?/, '');
+  return /^[A-Z0-9]{6}$/.test(bare) ? `AT-${bare}` : value;
+}
+
+/**
+ * Matches both the random codes and the legacy six-digit numbers inside free
+ * text. The dash is required here — without it "attitude" reads as AT-TITUDE.
+ */
+export const ORDER_NUMBER_PATTERN = /\bAT-[A-Z0-9]{6}\b/i;

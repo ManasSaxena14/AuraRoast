@@ -23,8 +23,8 @@ import { GUIDES } from '@/data/guides';
 import { MODIFIERS } from '@/data/modifiers';
 import { ORIGINS } from '@/data/origins';
 import { SEED_REVIEWS } from '@/data/reviews';
-import { STORES, STORE_BY_SLUG } from '@/data/stores';
-import { slotTimesForDay, toDateKey } from '@/domain/slots';
+import { STORES } from '@/data/stores';
+import { addDays, bookableDates, slotSeedsFor, toDateKey } from '@/domain/slots';
 import type {
   LoyaltyLedgerEntry,
   Order,
@@ -73,67 +73,28 @@ export interface DbState {
  * written before a new store existed has no slots for it, and the failure is
  * silent: the room simply shows no availability forever.
  */
-const STATE_VERSION = 4;
+const STATE_VERSION = 5;
 const DATA_DIR = join(process.cwd(), '.data');
 const STATE_FILE = join(DATA_DIR, 'state.json');
 
-/* ── Slot generation — 21 days of 30-minute tables, plus weekly events ── */
+/* ── Slot generation — 14 days of 30-minute tables, plus weekly events ──
+   The same `slotSeedsFor` the Postgres adapter uses, on the shop's (IST)
+   calendar, so both backends offer exactly the same grid. */
 function seedSlots(): ReservationSlot[] {
   const out: ReservationSlot[] = [];
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const times = slotTimesForDay();
-
-  // 14 days, matching the window the booking UI offers. Generating 21 for
-  // twelve stores is ~2,000 slot rows nobody can reach.
-  for (let d = 0; d < 14; d++) {
-    const day = new Date(today);
-    day.setDate(day.getDate() + d);
-    const key = toDateKey(day);
-    const weekend = day.getDay() === 0 || day.getDay() === 6;
-
+  for (const key of bookableDates(new Date(), 14)) {
     for (const store of STORES) {
-      for (const t of times) {
-        const hour = Number(t.slice(0, 2));
-        const peak = hour >= 8 && hour <= 11;
+      for (const s of slotSeedsFor(store.slug, key)) {
         out.push({
-          id: `slot-${store.slug}-${key}-${t}`,
+          id:
+            s.type === 'event'
+              ? `slot-event-${store.slug}-${key}-${s.slotTime}`
+              : `slot-${store.slug}-${key}-${s.slotTime}`,
           storeId: store.id,
-          slotDate: key,
-          slotTime: t,
-          type: 'table',
-          capacity: peak ? (weekend ? 10 : 8) : weekend ? 8 : 6,
           bookedCount: 0,
+          ...s,
         });
       }
-    }
-
-    // Saturday cupping · Wednesday brew class — the same capacity engine (§2.1)
-    if (day.getDay() === 6) {
-      out.push({
-        id: `slot-event-cupping-${key}`,
-        storeId: STORE_BY_SLUG.get('jayanagar')!.id,
-        slotDate: key,
-        slotTime: '09:00',
-        type: 'event',
-        capacity: 12,
-        bookedCount: 0,
-        eventTitle: 'Saturday Cupping · five origins, blind',
-        eventPrice: 60000,
-      });
-    }
-    if (day.getDay() === 3) {
-      out.push({
-        id: `slot-event-brewclass-${key}`,
-        storeId: STORE_BY_SLUG.get('koramangala')!.id,
-        slotDate: key,
-        slotTime: '18:30',
-        type: 'event',
-        capacity: 8,
-        bookedCount: 0,
-        eventTitle: 'Brew Class · V60 from first principles',
-        eventPrice: 95000,
-      });
     }
   }
   return out;
@@ -168,7 +129,7 @@ function freshState(): DbState {
         drinkId: 'drk-beans-chikmagalur',
         cadence: 'biweekly',
         quantity: 1,
-        nextDelivery: toDateKey(new Date(Date.now() + 6 * 864e5)),
+        nextDelivery: addDays(toDateKey(), 6),
         status: 'active',
         createdAt: new Date('2026-03-14T09:00:00.000Z').toISOString(),
       },
@@ -235,11 +196,6 @@ export const db: DbState = g.__auraState ?? (g.__auraState = load());
 
 export function commit(): void {
   persist(db);
-}
-
-export function nextOrderNumber(): string {
-  db.orderSeq += 1;
-  return `AT-${String(db.orderSeq).padStart(6, '0')}`;
 }
 
 /* Static catalogue — read-only, shared by both adapters. */

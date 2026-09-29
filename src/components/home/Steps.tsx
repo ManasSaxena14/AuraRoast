@@ -6,7 +6,7 @@
  */
 import Link from 'next/link';
 import { useRef } from 'react';
-import { gsap, useGSAP } from '@/components/motion/gsap';
+import { ScrollTrigger, gsap, useGSAP } from '@/components/motion/gsap';
 import { Reveal } from '@/components/motion/Reveal';
 import { HOW_IT_WORKS } from '@/data/content';
 
@@ -16,28 +16,25 @@ export function Steps() {
   useGSAP(
     () => {
       const el = ref.current;
-      if (!el) return;
+      // Written on the line itself, a leaf: set on `.steps`, the inherited
+      // property re-styled every step card underneath it on every frame.
+      const line = el?.querySelector<HTMLElement>('.steps__line i');
+      if (!el || !line) return;
       const mm = gsap.matchMedia();
 
       mm.add('(prefers-reduced-motion: no-preference)', () => {
-        const st = gsap.to(el, {
-          ease: 'none', // scroll-linked: no easing curve, ever (§12.4)
-          scrollTrigger: {
-            trigger: el,
-            start: 'top 75%',
-            end: 'bottom 65%',
-            scrub: true,
-            onUpdate: (self) => el.style.setProperty('--steps-progress', String(self.progress)),
-          },
+        const st = ScrollTrigger.create({
+          trigger: el,
+          start: 'top 75%',
+          end: 'bottom 65%',
+          // scroll-linked: no easing curve, ever (§12.4)
+          onUpdate: (self) => line.style.setProperty('--steps-progress', self.progress.toFixed(3)),
         });
-        return () => {
-          st.scrollTrigger?.kill();
-          st.kill();
-        };
+        return () => st.kill();
       });
 
       mm.add('(prefers-reduced-motion: reduce)', () => {
-        el.style.setProperty('--steps-progress', '1');
+        line.style.setProperty('--steps-progress', '1');
       });
 
       return () => mm.revert();

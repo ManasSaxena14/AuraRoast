@@ -105,7 +105,9 @@ export function priceLine(drink: Drink, line: CartLine, modifiers?: ModifierInde
   return {
     lineId: line.lineId,
     drinkId: drink.id,
-    name: line.name || drink.name,
+    // The catalogue's name, not the line's: the line arrives off the wire, and
+    // whatever it calls itself must not end up printed on the receipt.
+    name: drink.name,
     unitPrice,
     quantity,
     lineTotal: unitPrice * quantity,

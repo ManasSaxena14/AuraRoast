@@ -8,8 +8,10 @@
  * changes. Animating a checkout is how you lose an order.
  */
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
+import { SessionContext } from 'next-auth/react';
+import { rememberOrder } from '@/lib/device-orders';
 import { formatMoney } from '@/domain/money';
 import { describeSelection } from '@/domain/brew-plan';
 import { Reveal } from '@/components/motion/Reveal';
@@ -89,6 +91,18 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
   const [error, setError] = useState<string | null>(null);
   const [stage, setStage] = useState<PlacingStage | null>(null);
   const [placed, setPlaced] = useState<string | null>(null);
+
+  /* Signed in: the account's name and email go in once, and stay editable —
+     the order is attached to the account by the server either way. */
+  const session = useContext(SessionContext);
+  const prefilled = useRef(false);
+  useEffect(() => {
+    const user = session?.status === 'authenticated' ? session.data?.user : null;
+    if (!user || prefilled.current) return;
+    prefilled.current = true;
+    if (user.name) setName((v) => v || user.name || '');
+    if (user.email) setEmail((v) => v || user.email || '');
+  }, [session]);
 
   /* The server re-prices the cart before checkout is ever shown (§9.1). */
   useEffect(() => {
@@ -255,8 +269,20 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
 
         setStage('done');
         setPlaced(data.order.orderNumber);
-        sessionStorage.removeItem('aura.idem');
-        sessionStorage.setItem('aura.lastOrder', data.order.orderNumber);
+        try {
+          sessionStorage.removeItem('aura.idem');
+          sessionStorage.setItem('aura.lastOrder', data.order.orderNumber);
+        } catch {
+          /* private mode — nothing here is load-bearing */
+        }
+        // Kept on this device: /account lists it for a guest who never signs
+        // in, and the contact is the proof for cancelling or adding a UTR.
+        rememberOrder({
+          orderNumber: data.order.orderNumber,
+          contact: email.trim(),
+          placedAt: data.order.placedAt,
+          total: data.order.total,
+        });
         clear();
         // Hold the closed Halo for a beat so it reads as completion, then hand
         // straight into the confirmation ceremony.

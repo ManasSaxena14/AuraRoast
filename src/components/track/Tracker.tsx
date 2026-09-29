@@ -22,8 +22,10 @@ import { Halo } from '@/components/motion/Halo';
 import { Reveal } from '@/components/motion/Reveal';
 import { NumberRoll } from '@/components/motion/NumberRoll';
 import { Button } from '@/components/ui/Button';
+import { Field } from '@/components/ui/Field';
 import { toast } from '@/components/toast/ToastProvider';
-import type { Order, OrderStatus } from '@/domain/types';
+import { contactFor } from '@/lib/device-orders';
+import type { Order, OrderStatus, PaymentStatus } from '@/domain/types';
 
 const MapCanvas = dynamic(() => import('@/components/map/MapCanvas'), {
   ssr: false,
@@ -34,6 +36,8 @@ const POLL_MS = 2500;
 
 interface TrackPayload {
   status: OrderStatus;
+  paymentStatus: PaymentStatus;
+  plan: { totalDurationMs: number; distanceKm: number } | null;
   state: {
     currentStage: OrderStatus;
     overallProgress: number;
@@ -53,25 +57,32 @@ interface TrackPayload {
 export function Tracker({
   order: initial,
   initialState,
-  contact,
+  ownedBySession = false,
 }: {
+  /** The shareable view: no email, and only the tail of the phone. */
   order: Order;
-  /**
-   * The guest's own contact detail, echoed back as `X-Aura-Contact`. The track
-   * and cancel routes are guarded by it — order numbers are sequential, so
-   * without a proof anyone could poll or cancel a stranger's order.
-   */
-  contact?: string | null;
   /**
    * The derived state, computed on the server for the first paint. Nothing ever
    * advances the stored `status` column, so falling back to it paints "Order
    * received / 0 %" for an order that was delivered an hour ago (§7.4).
    */
   initialState?: TrackPayload['state'];
+  /** The signed-in account placed this order, so the server will take its word. */
+  ownedBySession?: boolean;
 }) {
   const [order, setOrder] = useState(initial);
   const [data, setData] = useState<TrackPayload | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  /**
+   * The proof for cancelling: the contact given at checkout, remembered by
+   * the device that placed the order. Read after mount — localStorage does not
+   * exist on the server. Without it (a shared link, another device) the guest
+   * is asked for it, unless their signed-in session already owns the order.
+   */
+  const [proof, setProof] = useState<string | null>(null);
+  const [askProof, setAskProof] = useState(false);
+  const [proofInput, setProofInput] = useState('');
+  useEffect(() => setProof(contactFor(initial.orderNumber)), [initial.orderNumber]);
   /**
    * The poll lands every 2.5s, but an ETA that only moves every 2.5s reads as
    * broken. `tick` re-renders once a second so the countdown counts, while the
@@ -91,10 +102,7 @@ export function Tracker({
 
   const poll = useCallback(async () => {
     try {
-      const res = await fetch(`/api/orders/${initial.orderNumber}/track`, {
-        cache: 'no-store',
-        headers: contact ? { 'X-Aura-Contact': contact } : undefined,
-      });
+      const res = await fetch(`/api/orders/${initial.orderNumber}/track`, { cache: 'no-store' });
       if (!res.ok) return;
       const next = (await res.json()) as TrackPayload;
       lastPollAt.current = Date.now();
@@ -108,28 +116,56 @@ export function Tracker({
     } catch {
       /* a dropped poll is not an error state — the next one will land */
     }
-  }, [initial.orderNumber, contact]);
+  }, [initial.orderNumber]);
+
+  // Live status: a UPI order can be verified, or a tab elsewhere can cancel,
+  // while this page is open — the poll is the truth, the first paint is not.
+  const status = order.status === 'cancelled' ? 'cancelled' : (data?.status ?? order.status);
+  const state = data?.state ?? initialState;
+  const stage = state?.currentStage ?? status;
+  const settled = status === 'cancelled' || stage === 'delivered';
 
   useEffect(() => {
-    void poll();
-    const id = setInterval(poll, POLL_MS);
-    return () => clearInterval(id);
-  }, [poll]);
+    // Nothing moves once it is delivered or cancelled, and nothing needs
+    // watching in a tab nobody is looking at — each poll is a server request.
+    if (settled) return;
+    let id: ReturnType<typeof setInterval> | undefined;
+    const start = () => {
+      if (id !== undefined || document.hidden) return;
+      void poll();
+      id = setInterval(poll, POLL_MS);
+    };
+    const stop = () => {
+      if (id !== undefined) clearInterval(id);
+      id = undefined;
+    };
+    const onVisibility = () => (document.hidden ? stop() : start());
+    start();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [poll, settled]);
+
+  // A delivered or cancelled order is never polled, but its map still needs
+  // the route and the pins once.
+  useEffect(() => {
+    if (settled && !data) void poll();
+  }, [settled, data, poll]);
 
   useEffect(() => setMounted(true), []);
 
-  // One-second heartbeat for the countdown only.
+  // One-second heartbeat for the countdown only — and only while it counts.
   useEffect(() => {
+    if (settled) return;
     const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
-  }, []);
-
-  const state = data?.state ?? initialState;
-  const stage = state?.currentStage ?? order.status;
+  }, [settled]);
 
   // Interpolate between polls so the ring and the clock both move continuously.
   const sincePoll = mounted && tick >= 0 ? Date.now() - lastPollAt.current : 0;
-  const planMs = order.deliveryPlan?.totalDurationMs ?? 0;
+  const planMs = data?.plan?.totalDurationMs ?? order.deliveryPlan?.totalDurationMs ?? 0;
   const rawProgress = state?.overallProgress ?? 0;
   const progress =
     planMs > 0 && rawProgress < 1
@@ -138,7 +174,7 @@ export function Tracker({
   const etaMs =
     state?.etaMs != null ? Math.max(0, state.etaMs - sincePoll) : null;
 
-  const distanceKm = order.deliveryPlan?.distanceKm ?? 0;
+  const distanceKm = data?.plan?.distanceKm ?? order.deliveryPlan?.distanceKm ?? 0;
   const travelled = state?.travelledFraction ?? 0;
   const remainingKm = Math.max(0, distanceKm * (1 - travelled));
 
@@ -162,21 +198,36 @@ export function Tracker({
       : []),
   ];
 
-  async function cancel() {
+  async function cancel(withProof: string | null = proof) {
+    if (!withProof && !ownedBySession) {
+      setAskProof(true);
+      return;
+    }
+    if (!window.confirm(`Cancel ${order.orderNumber}? Nothing has been charged.`)) return;
     setCancelling(true);
     try {
       const res = await fetch(`/api/orders/${order.orderNumber}/cancel`, {
         method: 'POST',
-        headers: contact ? { 'X-Aura-Contact': contact } : undefined,
+        headers: withProof ? { 'X-Aura-Contact': withProof } : undefined,
       });
-      const body = await res.json();
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast(body.error ?? 'Could not cancel.', 'error');
+        // A 404 on a page that just rendered the order means the proof was wrong.
+        toast(
+          res.status === 404
+            ? 'That is not the email or phone this order was placed with.'
+            : (body.error ?? 'Could not cancel.'),
+          'error',
+        );
+        if (res.status === 404) setAskProof(true);
         return;
       }
       setOrder(body.order);
+      setAskProof(false);
       toast('Cancelled. Nothing was charged.', 'success');
       void poll();
+    } catch {
+      toast('The connection dropped — the order was not cancelled.', 'error');
     } finally {
       setCancelling(false);
     }
@@ -189,7 +240,7 @@ export function Tracker({
    */
   const cancellable =
     state != null &&
-    order.status !== 'cancelled' &&
+    status !== 'cancelled' &&
     stage !== 'out_for_delivery' &&
     stage !== 'delivered';
 
@@ -206,7 +257,7 @@ export function Tracker({
           <Halo
             size={92}
             stroke={2.5}
-            progress={order.status === 'cancelled' ? 1 : progress}
+            progress={status === 'cancelled' ? 1 : progress}
             shared
             animateOnMount={false}
             label={`Order ${Math.round(progress * 100)}% of the way`}
@@ -217,12 +268,12 @@ export function Tracker({
           </Halo>
           <div className="stack-sm">
             <h1 style={{ fontSize: 'var(--text-2xl)' }}>
-              {ORDER_STAGE_COPY[order.status === 'cancelled' ? 'cancelled' : stage]?.label}
+              {ORDER_STAGE_COPY[status === 'cancelled' ? 'cancelled' : stage]?.label}
             </h1>
             <p className="muted">
-              {ORDER_STAGE_COPY[order.status === 'cancelled' ? 'cancelled' : stage]?.detail}
+              {ORDER_STAGE_COPY[status === 'cancelled' ? 'cancelled' : stage]?.detail}
             </p>
-            {order.status !== 'cancelled' ? (
+            {status !== 'cancelled' ? (
               <p className="mono track__eta" data-advanced={justAdvanced || undefined}>
                 {formatEta(etaMs)} away
               </p>
@@ -231,8 +282,8 @@ export function Tracker({
                 would otherwise never hear. Stage copy only — the ETA re-renders
                 once a second and would drown the one announcement worth making. */}
             <div aria-live="polite" aria-atomic="true" className="sr-only">
-              {ORDER_STAGE_COPY[order.status === 'cancelled' ? 'cancelled' : stage]?.label}.{' '}
-              {ORDER_STAGE_COPY[order.status === 'cancelled' ? 'cancelled' : stage]?.detail}
+              {ORDER_STAGE_COPY[status === 'cancelled' ? 'cancelled' : stage]?.label}.{' '}
+              {ORDER_STAGE_COPY[status === 'cancelled' ? 'cancelled' : stage]?.detail}
             </div>
           </div>
         </div>
@@ -262,7 +313,7 @@ export function Tracker({
         </div>
 
         <div className="stack">
-          {order.status !== 'cancelled' && travelled > 0 ? (
+          {status !== 'cancelled' && travelled > 0 ? (
             <div className="track__live" data-advanced={justAdvanced || undefined}>
               <span className="track__pip" aria-hidden="true" />
               <span className="mono">
@@ -285,7 +336,7 @@ export function Tracker({
                 second, and this is the same pattern the home page's step
                 connector already uses. */}
             <span className="timeline__rail" aria-hidden="true">
-              <i style={{ transform: `scaleY(${order.status === 'cancelled' ? 0 : progress})` }} />
+              <i style={{ transform: `scaleY(${status === 'cancelled' ? 0 : progress})` }} />
             </span>
             {(state?.stages ?? []).map((s) => (
               <div
@@ -311,7 +362,7 @@ export function Tracker({
                 </div>
               </div>
             ))}
-            {order.status === 'pending_payment' ? (
+            {status === 'pending_payment' ? (
               <div className="timeline__stage" data-active>
                 <span className="timeline__node" />
                 <div className="stack-sm">
@@ -324,10 +375,40 @@ export function Tracker({
             ) : null}
           </div>
 
-          {cancellable ? (
-            <Button variant="danger" onClick={cancel} loading={cancelling}>
+          {cancellable && !askProof ? (
+            <Button variant="danger" onClick={() => void cancel()} loading={cancelling}>
               Cancel this order
             </Button>
+          ) : null}
+
+          {cancellable && askProof ? (
+            <form
+              className="card stack-sm"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const value = proofInput.trim();
+                if (value) void cancel(value);
+              }}
+            >
+              <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>
+                To cancel from here, confirm the email or phone number this order was placed with.
+              </p>
+              <Field
+                label="Email or phone"
+                value={proofInput}
+                onChange={(e) => setProofInput(e.target.value)}
+                autoComplete="email"
+                required
+              />
+              <div className="row" style={{ gap: 'var(--space-2)' }}>
+                <Button type="submit" variant="danger" size="sm" loading={cancelling}>
+                  Cancel the order
+                </Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setAskProof(false)}>
+                  Keep it
+                </Button>
+              </div>
+            </form>
           ) : null}
 
           {order.fulfillment === 'delivery' && (order.addressLine || data?.destination) ? (
@@ -338,7 +419,8 @@ export function Tracker({
               </p>
               {order.guestName ? (
                 <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-                  Recipient: {order.guestName} {order.guestPhone ? `· ${order.guestPhone}` : ''}
+                  For {order.guestName}
+                  {order.guestPhone ? ` · phone ending ${order.guestPhone.replace(/\D/g, '')}` : ''}
                 </p>
               ) : null}
             </div>

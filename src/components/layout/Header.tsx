@@ -13,12 +13,16 @@ import { useEffect, useRef, useState } from 'react';
 import { NAV } from '@/config/site';
 import { ScrollProgress } from '@/components/motion/ScrollProgress';
 import { useCart } from '@/components/cart/CartProvider';
+import { formatMoneyShort } from '@/domain/money';
+import { FREE_DELIVERY_THRESHOLD } from '@/domain/pricing';
+import { AccountLink } from './AccountLink';
 import { Logo } from './Logo';
 
 export function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [announceDismissed, setAnnounceDismissed] = useState(false);
+  const scrolledRef = useRef(false);
   const pathname = usePathname();
   const { count, open } = useCart();
 
@@ -34,7 +38,14 @@ export function Header() {
   };
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 80);
+    // Compared before it is set: this fires on every scroll frame, and a
+    // setState per frame is a render scheduled per frame even when it bails.
+    const onScroll = () => {
+      const next = window.scrollY > 80;
+      if (next === scrolledRef.current) return;
+      scrolledRef.current = next;
+      setScrolled(next);
+    };
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
@@ -52,7 +63,7 @@ export function Header() {
           <div className="announce-bar__inner">
             <span className="announce-bar__dot" aria-hidden="true" />
             <span className="announce-bar__text">
-              Free delivery on orders over ₹500&nbsp;&nbsp;·&nbsp;&nbsp;Burnt Honey Mocha is back, October–February&nbsp;&nbsp;·&nbsp;&nbsp;12 rooms across 6 cities
+              Free delivery on orders over {formatMoneyShort(FREE_DELIVERY_THRESHOLD)}&nbsp;&nbsp;·&nbsp;&nbsp;Burnt Honey Mocha is back, October–February&nbsp;&nbsp;·&nbsp;&nbsp;12 rooms across 6 cities
             </span>
             <button className="announce-bar__close" onClick={dismissAnnounce} aria-label="Dismiss announcement">
               <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
@@ -81,9 +92,7 @@ export function Header() {
 
         <div className="header__actions">
           <ScrollProgress />
-          <Link href="/account" className="btn btn--ghost btn--sm header__account">
-            Account
-          </Link>
+          <AccountLink className="btn btn--ghost btn--sm header__account" />
           <button className="cart-button" onClick={open} aria-label={`Open cart, ${count} items`}>
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
               <path
@@ -117,9 +126,7 @@ export function Header() {
               {item.label}
             </Link>
           ))}
-          <Link href="/account" className="header__mobile-link">
-            Account
-          </Link>
+          <AccountLink className="header__mobile-link" mobile />
         </nav>
       ) : null}
     </header>

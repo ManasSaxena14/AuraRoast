@@ -5,6 +5,7 @@
  * `SELECT booked_count` before it anywhere in this file — that read-then-write
  * gap is the entire race this design removes.
  */
+import { z } from 'zod';
 import { DomainError, NotFoundError } from '@/domain/errors';
 import { assertReservationTransition } from '@/domain/state-machine';
 import { slotAvailability, toDateKey, validatePartySize, remaining } from '@/domain/slots';
@@ -58,22 +59,31 @@ export async function upcomingEvents() {
   );
 }
 
-export interface BookInput {
-  slotId: string;
-  guestName: string;
-  guestEmail: string;
-  guestPhone?: string;
-  partySize: number;
-  notes?: string;
-  userId?: string | null;
-}
+/* The body arrives off the wire: `guestName: 42` used to reach `.trim()` as a
+   TypeError and surface as a 500 instead of a 400 the guest could read. */
+const bookSchema = z.object({
+  slotId: z.string().min(1).max(200),
+  guestName: z.string().max(120).default(''),
+  guestEmail: z.string().max(300).default(''),
+  guestPhone: z.string().max(40).nullish(),
+  partySize: z.coerce.number(),
+  notes: z.string().max(1000).nullish(),
+});
 
-export async function book(input: BookInput): Promise<Reservation> {
-  validatePartySize(input.partySize);
-  if (!input.guestEmail?.includes('@')) {
-    throw new DomainError('A contact email is required.', 'invalid_email', 400);
+export type BookInput = z.input<typeof bookSchema>;
+
+/** `userId` is the signed-in guest, from the session — never from the body. */
+export async function book(raw: unknown, userId: string | null = null): Promise<Reservation> {
+  const parsed = bookSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new DomainError('That booking could not be read.', 'invalid_body', 400, parsed.error.issues);
   }
-  if (!input.guestName?.trim()) {
+  const input = parsed.data;
+  validatePartySize(input.partySize);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.guestEmail.trim())) {
+    throw new DomainError('A valid contact email is required.', 'invalid_email', 400);
+  }
+  if (!input.guestName.trim()) {
     throw new DomainError('A name is required.', 'name_required', 400);
   }
 
@@ -91,12 +101,12 @@ export async function book(input: BookInput): Promise<Reservation> {
       id: uuid(),
       reference: reservationReference(),
       slotId: input.slotId,
-      userId: input.userId ?? null,
+      userId,
       guestName: input.guestName.trim(),
       guestEmail: input.guestEmail.trim(),
-      guestPhone: input.guestPhone?.trim() ?? null,
+      guestPhone: input.guestPhone?.trim() || null,
       partySize: input.partySize,
-      notes: input.notes?.trim() ?? null,
+      notes: input.notes?.trim() || null,
       status: 'booked',
       createdAt: new Date().toISOString(),
     });
@@ -115,10 +125,9 @@ export async function lookup(reference: string) {
 
 export async function cancel(reference: string): Promise<Reservation> {
   const r = await lookup(reference);
+  if (r.status === 'cancelled') return r;
   assertReservationTransition(r.status, 'cancelled');
+  const updated = await updateReservation(reference, { status: 'cancelled' });
   await releaseSlot(r.slotId, r.partySize);
-  const updated = await updateReservation(reference, {
-    status: 'cancelled',
-  });
-  return updated!;
+  return updated ?? { ...r, status: 'cancelled' };
 }
