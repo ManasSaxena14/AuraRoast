@@ -8,6 +8,13 @@
       "when": 1788860385668,
       "tag": "0000_furry_magus",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791838906492,
+      "tag": "0001_order_delivery_pincode",
+      "breakpoints": true
     }
   ]
 }

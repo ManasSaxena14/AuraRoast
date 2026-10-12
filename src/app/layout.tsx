@@ -7,6 +7,8 @@ import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { BackToTop } from '@/components/layout/BackToTop';
 import { PageTransition } from '@/components/motion/PageTransition';
+import { AmbientField } from '@/components/three/AmbientField';
+import { PageIntro } from '@/components/motion/PageIntro';
 import { features } from '@/config/env';
 import { listDrinks, listModifiers } from '@/repositories';
 
@@ -73,6 +75,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           {/* Header, cart drawer and Barista live OUTSIDE <PageTransition> —
               they persist across navigation and are never snapshotted (§13.3). */}
           <Header />
+          {/* Persists across navigation: one WebGL context, re-roasted per route. */}
+          <AmbientField />
+          <PageIntro />
           <main id="main">
             <PageTransition>{children}</PageTransition>
           </main>

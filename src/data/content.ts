@@ -61,7 +61,7 @@ export const NUMBERS = [
 ] as const;
 
 export const FOOTER_NOTE =
-  'Maps © OpenStreetMap contributors · Tiles by CARTO · Routing by OSRM · Weather by Open-Meteo. Photography via Openverse under CC0 and CC BY — full credits at /credits. Every external service in this build is free and key-less by design.';
+  'Maps © OpenStreetMap contributors · Tiles by Esri · Routing by OSRM · Geocoding by Nominatim · Weather by Open-Meteo. Photography via Openverse (CC0 / CC BY) and Unsplash — full credits at /credits.';
 
 export const FAQ = [
   {

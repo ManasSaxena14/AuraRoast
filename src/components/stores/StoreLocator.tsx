@@ -13,6 +13,7 @@ import { Reveal } from '@/components/motion/Reveal';
 import { CountUp } from '@/components/motion/CountUp';
 import { Button } from '@/components/ui/Button';
 import { haversine } from '@/lib/geo';
+import { openState } from '@/lib/hours';
 import { storesByCity } from '@/data/stores';
 import type { Store } from '@/domain/types';
 
@@ -20,27 +21,6 @@ const MapCanvas = dynamic(() => import('@/components/map/MapCanvas'), {
   ssr: false,
   loading: () => <div className="skeleton" style={{ width: '100%', height: '100%' }} />,
 });
-
-/** Every room is in India, so the badge reads the IST wall clock, not the visitor's. */
-const IST = new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'Asia/Kolkata',
-  weekday: 'short',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-});
-
-function openState(store: Store, now: Date) {
-  const parts = IST.formatToParts(now);
-  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
-  const hours = store.hours[part('weekday').toLowerCase()];
-  if (!hours) return { open: false, label: 'Closed today' };
-  const [from, to] = hours;
-  const mins = Number(part('hour')) * 60 + Number(part('minute'));
-  const toMins = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
-  const open = mins >= toMins(from) && mins < toMins(to);
-  return { open, label: open ? `Open until ${to}` : `Opens ${from}` };
-}
 
 /** Centre and zoom that frame a set of stores without a fitBounds round trip. */
 function frame(stores: Store[]) {
@@ -58,6 +38,13 @@ export function StoreLocator({ stores }: { stores: Store[] }) {
   // /stores is prerendered: reading the clock during render would bake the build
   // minute into the HTML and mismatch on hydration. Badge waits for mount.
   const [now, setNow] = useState<Date | null>(null);
+
+  // `/stores?city=mumbai` (the footer's city links) opens on that city.
+  useEffect(() => {
+    const slug = new URLSearchParams(window.location.search).get('city');
+    const match = slug ? groups.find((g) => g.slug === slug) : null;
+    if (match) setCity(match.name);
+  }, [groups]);
   useEffect(() => setNow(new Date()), []);
 
   const visibleGroups = useMemo(
@@ -181,13 +168,15 @@ export function StoreLocator({ stores }: { stores: Store[] }) {
                   {s.blurb}
                 </p>
                 <div className="row wrap" style={{ gap: 'var(--space-3)', marginTop: 'var(--space-2)' }}>
-                  {/* Calling a room is not selecting it — keep the click off the row. */}
+                  {/* Getting directions is not selecting the room — keep the click off the row. */}
                   <a
                     className="link-arrow"
-                    href={`tel:${s.phone.replace(/\s/g, '')}`}
+                    href={`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    {s.phone}
+                    Directions <span aria-hidden="true">→</span>
                   </a>
                   {near ? (
                     <span className="mono muted" style={{ fontSize: 'var(--text-xs)' }}>

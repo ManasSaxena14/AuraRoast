@@ -9,8 +9,13 @@ export const runtime = 'nodejs';
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
-    const lat = Number(url.searchParams.get('lat')) || DEFAULT_STORE.lat;
-    const lng = Number(url.searchParams.get('lng')) || DEFAULT_STORE.lng;
+    // Absent falls back to the default bar; 0 is a real coordinate, not absence.
+    const coord = (raw: string | null, fallback: number, limit: number) => {
+      const n = raw === null || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(n) && Math.abs(n) <= limit ? n : fallback;
+    };
+    const lat = coord(url.searchParams.get('lat'), DEFAULT_STORE.lat, 90);
+    const lng = coord(url.searchParams.get('lng'), DEFAULT_STORE.lng, 180);
     const mood = url.searchParams.get('mood');
 
     const [drinks, weather] = await Promise.all([listDrinks(), fetchWeather(lat, lng)]);

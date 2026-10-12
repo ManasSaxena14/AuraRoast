@@ -1,4 +1,4 @@
-import Image from 'next/image';
+import Image from '@/components/ui/SmartImage';
 import Link from 'next/link';
 import { listDrinks, listOrigins } from '@/repositories';
 import { MANIFESTO, NUMBERS, FAQ } from '@/data/content';
@@ -17,6 +17,7 @@ import { Steps } from '@/components/home/Steps';
 import { DrinkRail } from '@/components/home/DrinkRail';
 import { RoastCurve } from '@/components/home/RoastCurve';
 import { BrandMarquee } from '@/components/home/BrandMarquee';
+import { RoastStage } from '@/components/home/RoastStage';
 
 /** Splits "1,750m" into the number to animate and the unit to leave alone. */
 function splitNumber(value: string): { n: number; suffix: string } {
@@ -100,6 +101,9 @@ export default async function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* GREEN TO ROAST — a 3D bean field that roasts as you scroll. */}
+      <RoastStage />
 
       {/* THE ROAST CURVE — an SVG that draws itself against the scroll. */}
       <section className="section">

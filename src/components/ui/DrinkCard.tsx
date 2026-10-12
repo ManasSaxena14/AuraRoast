@@ -8,7 +8,7 @@
  * `<ViewTransitions>` promotes exactly the tapped one by setting
  * `data-vt-active` before the snapshot, and clears it when the morph finishes.
  */
-import Image from 'next/image';
+import Image from '@/components/ui/SmartImage';
 import Link from 'next/link';
 import { formatMoneyShort } from '@/domain/money';
 import { Badge } from './bits';

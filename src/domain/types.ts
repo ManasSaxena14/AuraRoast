@@ -186,6 +186,8 @@ export interface Order {
   storeId: string | null;
   fulfillment: FulfillmentType;
   addressLine: string | null;
+  /** Six-digit India Post PIN for delivery orders; null for pickup. */
+  deliveryPincode: string | null;
   deliveryLat: number | null;
   deliveryLng: number | null;
   subtotal: Paise;
@@ -292,4 +294,6 @@ export interface Pairing {
   allergens: string[];
   isAvailable: boolean;
   sortOrder: number;
+  /** Drink slugs this plate was tasted against — drives cart suggestions. */
+  pairsWith: string[];
 }

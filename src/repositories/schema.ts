@@ -219,6 +219,9 @@ export const orders = pgTable('orders', {
   fulfillment: fulfillmentType('fulfillment').notNull().default('delivery'),
   addressId: uuid('address_id').references(() => addresses.id),
   addressLine: text('address_line'),
+  // Six-digit India Post PIN. Geocoded with the address so the courier's
+  // route ends in the right neighbourhood, and shown on the tracking page.
+  deliveryPincode: text('delivery_pincode'),
   deliveryLat: doublePrecision('delivery_lat'),
   deliveryLng: doublePrecision('delivery_lng'),
 

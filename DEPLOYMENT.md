@@ -1,6 +1,6 @@
 # Deploying AURA TOAST
 
-Live: **https://aura-roast-seven.vercel.app**
+Live: **https://aura-roast-cafe.vercel.app**
 
 The app is a standard Next.js 16 project. It deploys to Vercel with zero extra
 configuration (no `vercel.json` needed), and to any Node 22 host with
@@ -21,11 +21,11 @@ Set these in **Vercel → Project → Settings → Environment Variables** (tick
 | `AUTH_GOOGLE_ID` | **Yes** (for sign-in) | Google OAuth client ID | from Google Cloud Console |
 | `AUTH_GOOGLE_SECRET` | **Yes** (for sign-in) | Google OAuth client secret | from Google Cloud Console |
 | `ADMIN_EMAILS` | **Yes** | Comma-separated Google emails allowed into `/admin` and to verify UPI payments. **Unset = `/admin` locked for everyone.** | `you@gmail.com,manager@gmail.com` |
-| `NEXT_PUBLIC_SITE_URL` | **Yes** | Public URL, used for social-card links. Baked in at build time. | `https://aura-roast-seven.vercel.app` |
+| `NEXT_PUBLIC_SITE_URL` | **Yes** | Public URL, used for social-card links. Baked in at build time. | `https://aura-roast-cafe.vercel.app` |
 | `UPI_ID` | Recommended | The UPI ID customers pay to (shown on the QR). | `yourshop@okbank` |
 | `UPI_PAYEE_NAME` | Recommended | Name shown in the UPI app. | `Aura Toast Coffee` |
 | `GROQ_API_KEY` | Optional | Enables the LLM Barista. Without it a local responder answers, tools still work. | Groq console |
-| `GROQ_MODEL` | Optional | Defaults to `llama-3.3-70b-versatile`. | |
+| `GROQ_MODEL` | Optional | Defaults to `openai/gpt-oss-120b`. If the configured model is retired by Groq, the next available one is used automatically. | |
 | `ADMIN_SECRET` | Optional | Lets scripts verify payments with `Authorization: Bearer …`. | long random string |
 | `CRON_SECRET` | Optional | Protects `/api/cron/cleanup`. Cleanup also runs automatically. | long random string |
 | `TRUST_PROXY_HEADERS` | Non-Vercel only | Set to `1` only behind a proxy that **overwrites** `X-Forwarded-For`. Not needed on Vercel. | `1` |
@@ -36,9 +36,13 @@ Not needed: `AUTH_URL` (the host is trusted and derived per request).
 
 ## 2. Google sign-in setup (Google Cloud Console)
 
+Sign-in is **required** to order, book a table or write a review, so this step is
+not optional — on a domain Google does not know, those features stop working.
+
 1. **APIs & Services → Credentials →** your *OAuth 2.0 Client ID* (type: Web application).
+   Under **Authorized JavaScript origins** add `https://aura-roast-cafe.vercel.app`.
 2. **Authorized redirect URIs** — add:
-   - `https://aura-roast-seven.vercel.app/api/auth/callback/google`
+   - `https://aura-roast-cafe.vercel.app/api/auth/callback/google`
    - `http://localhost:3000/api/auth/callback/google` (local development)
 3. **OAuth consent screen →** set *Publishing status* to **In production**. While it
    says *Testing*, only listed test users can sign in.
@@ -47,8 +51,11 @@ Not needed: `AUTH_URL` (the host is trusted and derived per request).
 
 ## 3. Database
 
-- **Existing Neon database:** nothing to run — reservation slots are created by the
-  app the first time each day is viewed.
+- **Existing Neon database:** run any pending migrations before deploying new code
+  (`DATABASE_URL_UNPOOLED="postgresql://…" npm run db:migrate`). Migration
+  `0001_order_delivery_pincode` adds `orders.delivery_pincode`; order placement
+  fails without it. Reservation slots are created by the app the first time each
+  day is viewed — there is nothing to seed for them.
 - **Brand-new database:**
   ```bash
   DATABASE_URL_UNPOOLED="postgresql://…" npm run db:migrate
@@ -72,6 +79,8 @@ Not needed: `AUTH_URL` (the host is trusted and derived per request).
 | `/api/health` | `{"status":"ok","backend":"postgres",…,"googleAuth":true}` |
 | `/login` → *Continue with Google* | Google account chooser, then back on `/account` |
 | `/admin` signed in with an `ADMIN_EMAILS` account | the dashboard (anyone else: "Staff only") |
+| `/api/health?check=groq` | `"ok": true` — the AI Barista key and model work |
+| `/checkout` while signed out | redirects to `/login?callbackUrl=/checkout` |
 | `/reservations` | a slot grid for today/tomorrow |
 
 ---
@@ -82,7 +91,8 @@ Not needed: `AUTH_URL` (the host is trusted and derived per request).
 |---|---|
 | Build fails with `Module not found` | A source file was not committed — run `git status`, add it, push. |
 | `/admin` says **Staff only** | Your email is not in `ADMIN_EMAILS`. Add it, redeploy. |
-| Google **redirect_uri_mismatch** | Add the callback URI from section 2. |
+| Google **redirect_uri_mismatch** | Add the callback URI from section 2 — for every domain the site is served on. |
+| Barista replies feel canned (`"source": "local"`) | Open `/api/health?check=groq`; it names the problem (bad key, retired model). |
 | Google **Access blocked** | Consent screen still in *Testing*. |
 | *Continue with Google* disabled | `AUTH_SECRET`, `AUTH_GOOGLE_ID` or `AUTH_GOOGLE_SECRET` missing. |
 | First request after idle takes ~2 s | Neon scale-to-zero waking up. |

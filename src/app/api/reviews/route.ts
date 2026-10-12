@@ -35,18 +35,19 @@ export async function POST(req: Request) {
     }
     const body = parsed.data;
     const [viewer, drinks] = await Promise.all([getViewer(), listDrinks()]);
+    // Reviews come from accounts: one per person per drink (writing again
+    // edits it), and nobody can post under a name that is not theirs to use.
+    if (!viewer) throw new DomainError('Sign in to write a review.', 'auth_required', 401);
     const drink = drinks.find((d) => d.id === body.drinkId);
     if (!drink) throw new NotFoundError('Drink');
 
-    // Signed in, the account name stands in for an empty field — and the
-    // account gets one review per drink, which writing again edits.
-    const author = (body.author.trim() || (viewer && !viewer.demo ? viewer.user.name : '')).slice(0, 40);
+    const author = (body.author.trim() || viewer.user.name).slice(0, 40);
     if (!author) throw new DomainError('A name is required.', 'invalid_review', 400);
 
     const review = await insertReview({
       id: uuid(),
       drinkId: drink.id,
-      userId: viewer && !viewer.demo ? viewer.user.id : null,
+      userId: viewer.demo ? null : viewer.user.id,
       author,
       rating: body.rating,
       body: body.body.trim().slice(0, 600),

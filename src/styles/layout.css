@@ -294,48 +294,282 @@
   pointer-events: auto;
 }
 
-/* ── Footer ───────────────────────────────────────────────────────── */
+/* ── Footer ───────────────────────────────────────────────────────────
+   Three registers: the invitation (CTA band), the index (brand, live
+   status, links, cities) and the signature (the wordmark, small print). */
 .footer {
   position: relative;
-  padding-block: var(--space-9) var(--space-6);
+  overflow: hidden;
+  isolation: isolate;
+  padding-top: var(--space-9);
   border-top: var(--hairline);
-  background: linear-gradient(180deg, var(--roast-950), var(--roast-900));
+  background:
+    radial-gradient(60% 50% at 50% 100%, rgb(123 59 44 / 0.22), transparent 70%),
+    linear-gradient(180deg, var(--roast-950), #0e0a08);
 }
-.footer__top {
+/* A slow warm light drifting across the top edge. */
+.footer__aura {
+  position: absolute;
+  inset: -40% -10% auto;
+  height: 80%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(40% 50% at 30% 50%, rgb(216 166 87 / 0.1), transparent 70%);
+  animation: footer-drift 18s ease-in-out infinite alternate;
+}
+@keyframes footer-drift {
+  to {
+    transform: translateX(40%);
+  }
+}
+
+.footer-cta {
+  display: grid;
+  gap: var(--space-6);
+  align-items: end;
+  padding: var(--space-7);
+  margin-bottom: var(--space-9);
+  border-radius: var(--radius-lg);
+  border: 1px solid rgb(242 206 147 / 0.12);
+  background:
+    radial-gradient(80% 120% at 100% 0%, rgb(216 166 87 / 0.14), transparent 60%),
+    linear-gradient(140deg, rgb(49 37 29 / 0.7), rgb(26 19 16 / 0.7));
+  box-shadow: var(--edge-hi), 0 30px 60px -30px rgb(0 0 0 / 0.8);
+}
+.footer-cta__title {
+  font-size: clamp(1.9rem, 1.2rem + 2.6vw, 3.4rem);
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+}
+.footer-cta__title em {
+  font-style: italic;
+  color: var(--aura-300);
+}
+.footer-cta__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.footer__grid {
   display: grid;
   gap: var(--space-8);
   padding-bottom: var(--space-8);
 }
+.footer__brand {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+.footer__about {
+  max-width: 38ch;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+.footer-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: fit-content;
+  min-height: 30px;
+  padding: 4px 12px 4px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgb(242 206 147 / 0.14);
+  background: rgb(18 13 10 / 0.5);
+  font-size: var(--text-xs);
+  color: var(--smoke-400);
+}
+.footer-live strong {
+  color: var(--mist-100);
+  font-weight: 600;
+}
+.footer-live__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--smoke-400);
+}
+.footer-live[data-open] .footer-live__dot {
+  background: #7fbf7a;
+  box-shadow: 0 0 0 0 rgb(127 191 122 / 0.6);
+  animation: footer-ping 2s var(--ease-aura) infinite;
+}
+@keyframes footer-ping {
+  70% {
+    box-shadow: 0 0 0 7px rgb(127 191 122 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(127 191 122 / 0);
+  }
+}
+.footer__contact {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.footer__contact dt {
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--smoke-400);
+}
+.footer__contact dd {
+  margin: 2px 0 0;
+  color: var(--mist-100);
+  max-width: 34ch;
+}
+
 .footer__cols {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: var(--space-6);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-7) var(--space-6);
+}
+.footer__col ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+.footer__heading {
+  margin-bottom: var(--space-4);
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--aura-500);
 }
 .footer__link {
+  position: relative;
+  display: inline-block;
   font-size: var(--text-sm);
   color: var(--smoke-400);
-  transition: color var(--dur-sm) var(--ease-aura);
+  transition:
+    color var(--dur-sm) var(--ease-aura),
+    transform var(--dur-md) var(--ease-aura);
 }
-.footer__link:hover {
-  color: var(--aura-300);
+.footer__link:hover,
+.footer__link:focus-visible {
+  color: var(--mist-100);
+  transform: translateX(3px);
 }
+
+/* The signature: the brand set edge to edge, rising letter by letter. */
+.wordmark {
+  display: flex;
+  justify-content: center;
+  padding-inline: var(--gutter);
+  margin-top: var(--space-6);
+  font-family: var(--font-display), serif;
+  font-size: clamp(3.4rem, 0.5rem + 13.4vw, 15rem);
+  line-height: 0.82;
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+  user-select: none;
+}
+.wordmark__mask {
+  display: inline-block;
+  overflow: hidden;
+  padding-bottom: 0.06em;
+}
+.wordmark__l {
+  display: inline-block;
+  will-change: transform;
+  background: linear-gradient(
+    100deg,
+    rgb(242 206 147 / 0.18) 0%,
+    rgb(242 206 147 / 0.18) 40%,
+    rgb(242 206 147 / 0.9) 50%,
+    rgb(242 206 147 / 0.18) 60%,
+    rgb(242 206 147 / 0.18) 100%
+  );
+  background-size: 300% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-stroke: 1px rgb(242 206 147 / 0.22);
+}
+/* Once fully risen, one band of light crosses the whole word. */
+.wordmark[data-lit] .wordmark__l {
+  animation: wordmark-sheen 2.4s var(--ease-aura) 1 both;
+}
+@keyframes wordmark-sheen {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
 .footer__bottom {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-4);
   justify-content: space-between;
-  align-items: baseline;
-  padding-top: var(--space-5);
+  align-items: center;
+  padding-block: var(--space-5);
+  margin-top: var(--space-5);
+  border-top: var(--hairline);
+  font-size: var(--text-xs);
+  color: var(--smoke-400);
+}
+.footer__legal {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+  padding: 0;
+  margin: 0;
+}
+.footer__legal .footer__link {
   font-size: var(--text-xs);
 }
-.footer__attribution {
-  max-width: 62ch;
-  font-size: 11px;
-  line-height: 1.5;
+.footer__pay {
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
-@media (min-width: 900px) {
-  .footer__top {
-    grid-template-columns: 1fr 1.6fr;
+.footer__attribution {
+  max-width: 80ch;
+  padding-bottom: var(--space-7);
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgb(162 149 138 / 0.7);
+}
+
+@media (min-width: 720px) {
+  .footer-cta {
+    grid-template-columns: 1fr auto;
+    padding: var(--space-8);
+  }
+  .footer__cols {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1000px) {
+  .footer__grid {
+    grid-template-columns: 1fr 1.9fr;
+  }
+}
+/* Clear the floating back-to-top and Barista buttons in the bottom-right corner. */
+.footer__bottom,
+.footer__attribution {
+  padding-right: 72px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .footer__aura,
+  .footer-live[data-open] .footer-live__dot,
+  .wordmark[data-lit] .wordmark__l {
+    animation: none;
+  }
+  .footer__link:hover {
+    transform: none;
   }
 }
 
@@ -435,6 +669,7 @@
 }
 .barista__list {
   flex: 1;
+  min-height: 0; /* scroll inside the panel, not past it */
   overflow-y: auto;
   padding: var(--space-4) var(--space-5);
   display: flex;

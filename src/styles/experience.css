@@ -1,0 +1,563 @@
+/* ═══════════════════════════════════════════════════════════════
+   Experience — the three.js stages (home "green to roast", sign-in).
+   Every rule here works with the canvas absent: no WebGL, a failed chunk,
+   or reduced motion all leave a designed backdrop, never a hole.
+   ═══════════════════════════════════════════════════════════════ */
+
+.bean-canvas {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 1.2s var(--ease-aura);
+}
+.bean-canvas[data-ready='true'] {
+  opacity: 1;
+}
+.bean-canvas canvas {
+  outline: none;
+}
+
+/* ── Home: green to roast ─────────────────────────────────────────── */
+.roast-stage {
+  position: relative;
+  height: 320vh; /* three screens of scroll drive one roast */
+  background:
+    radial-gradient(70% 55% at 50% 45%, rgb(123 59 44 / 0.28), transparent 70%),
+    var(--roast-950);
+}
+.roast-stage__sticky {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  overflow: hidden;
+  display: grid;
+  align-items: center;
+}
+.roast-stage__canvas {
+  z-index: 0;
+  /* The beans part around the readout instead of crossing it. */
+  -webkit-mask-image: radial-gradient(30% 50% at 20% 54%, transparent 30%, #000 100%);
+  mask-image: radial-gradient(30% 50% at 20% 54%, transparent 30%, #000 100%);
+}
+/* The heat behind the beans swells as the roast deepens. */
+.roast-stage__glow {
+  position: absolute;
+  inset: -20%;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(40% 40% at 62% 50%, rgb(216 166 87 / 0.18), transparent 70%);
+  opacity: 0.35;
+  transition:
+    opacity 1.2s var(--ease-aura),
+    transform 1.2s var(--ease-aura);
+}
+.roast-stage__glow[data-stage='2'] { opacity: 0.55; }
+.roast-stage__glow[data-stage='3'] { opacity: 0.95; transform: scale(1.12); }
+.roast-stage__glow[data-stage='4'] { opacity: 0.8; transform: scale(1.06); }
+.roast-stage__glow[data-stage='5'] { opacity: 0.5; }
+
+.roast-stage__copy {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: var(--space-4);
+  padding-top: calc(var(--header-h) + var(--announce-h));
+  max-width: min(560px, 100%);
+  margin-left: 0;
+  pointer-events: none;
+}
+.roast-stage__copy a {
+  pointer-events: auto;
+}
+.roast-stage__copy::before {
+  /* A soft dark pool behind the copy so the beans never fight the text. */
+  content: '';
+  position: absolute;
+  inset: -20% -30% -20% -40%;
+  z-index: -1;
+  background: radial-gradient(60% 60% at 30% 50%, rgb(18 13 10 / 0.85), transparent 75%);
+}
+.roast-stage__copy h2 {
+  font-size: clamp(2rem, 1.3rem + 2.6vw, 3.6rem);
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+.roast-stage__readout {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+}
+.roast-stage__temp {
+  font-size: clamp(3rem, 1.6rem + 4.2vw, 5.6rem);
+  line-height: 0.85;
+  font-variant-numeric: tabular-nums;
+  color: var(--aura-300);
+  text-shadow: 0 0 40px rgb(216 166 87 / 0.35);
+  min-width: 3.2ch;
+}
+.roast-stage__temp sup {
+  font-size: 0.32em;
+  vertical-align: top;
+  margin-left: 4px;
+  color: var(--aura-500);
+}
+.roast-stage__stage {
+  display: grid;
+  gap: 4px;
+  max-width: 30ch;
+  animation: stage-swap var(--dur-lg) var(--ease-aura) both;
+}
+@keyframes stage-swap {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+    filter: blur(6px);
+  }
+}
+.roast-stage__step {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--smoke-400);
+}
+.roast-stage__stage strong {
+  font-family: var(--font-display), serif;
+  font-size: var(--text-xl);
+  font-weight: 500;
+}
+.roast-stage__stage .muted {
+  font-size: var(--text-sm);
+}
+
+.roast-stage__track {
+  position: relative;
+  height: 2px;
+  margin-block: var(--space-3) var(--space-6);
+  background: rgb(242 206 147 / 0.12);
+  border-radius: 2px;
+}
+.roast-stage__bar {
+  position: absolute;
+  inset: 0;
+  transform-origin: left;
+  transform: scaleX(0);
+  background: linear-gradient(90deg, #7f9a5a, #c79558 45%, #8f5a33 70%, #2e1a10);
+  box-shadow: 0 0 12px rgb(216 166 87 / 0.5);
+}
+.roast-stage__tick {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  background: var(--roast-700);
+  border: 1px solid rgb(242 206 147 / 0.3);
+  transition:
+    background var(--dur-md) var(--ease-aura),
+    transform var(--dur-md) var(--ease-bloom);
+}
+.roast-stage__tick[data-done='true'] {
+  background: var(--aura-500);
+  transform: scale(1.3);
+}
+.roast-stage__tick em {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-style: normal;
+  font-family: var(--font-mono), monospace;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--aura-300);
+  /* Only the current stage is labelled — six labels in a 400px track
+     collide, and the stage name is already set large above. */
+  opacity: 0;
+  transform: translate(-50%, -4px);
+  transition:
+    opacity var(--dur-md) var(--ease-aura),
+    transform var(--dur-md) var(--ease-aura);
+}
+.roast-stage__tick[data-current='true'] em {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.roast-stage__tick:first-of-type em {
+  left: 0;
+  transform: none;
+}
+.roast-stage__tick:last-of-type em {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+@media (max-width: 639px) {
+  .roast-stage {
+    height: 260vh;
+  }
+  .roast-stage__canvas {
+    -webkit-mask-image: linear-gradient(180deg, #000 0 35%, rgb(0 0 0 / 0.3) 60%);
+    mask-image: linear-gradient(180deg, #000 0 35%, rgb(0 0 0 / 0.3) 60%);
+  }
+  .roast-stage__copy {
+    align-self: end;
+    padding-bottom: var(--space-8);
+  }
+  .roast-stage__tick em {
+    display: none;
+  }
+  .roast-stage__readout {
+    gap: var(--space-4);
+  }
+}
+
+/* ── Sign in / create account ─────────────────────────────────────── */
+.auth {
+  position: relative;
+  min-height: 100svh;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: center;
+  gap: var(--space-7);
+  padding: calc(var(--header-h) + var(--announce-h) + var(--space-6)) var(--gutter) var(--space-8);
+  overflow: hidden;
+  isolation: isolate;
+}
+.auth__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(50% 60% at 70% 40%, rgb(123 59 44 / 0.35), transparent 70%),
+    radial-gradient(40% 50% at 20% 80%, rgb(216 166 87 / 0.12), transparent 70%),
+    var(--roast-950);
+}
+.auth__backdrop::after {
+  /* Two soft pools of shade — behind the story and behind the card — so
+     the text reads while the beans stay visible everywhere else. */
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(38% 55% at 24% 52%, rgb(18 13 10 / 0.78), transparent 72%),
+    radial-gradient(30% 50% at 78% 50%, rgb(18 13 10 / 0.6), transparent 70%);
+}
+/* The beans frame the content instead of crossing it: the canvas fades out
+   where the headline sits, and thins under the card. */
+.auth__backdrop .bean-canvas {
+  -webkit-mask-image: radial-gradient(34% 46% at 24% 52%, transparent 35%, #000 100%);
+  mask-image: radial-gradient(34% 46% at 24% 52%, transparent 35%, #000 100%);
+}
+@media (max-width: 959px) {
+  .auth__backdrop .bean-canvas {
+    -webkit-mask-image: linear-gradient(180deg, #000, rgb(0 0 0 / 0.25) 30%, rgb(0 0 0 / 0.25) 70%, #000);
+    mask-image: linear-gradient(180deg, #000, rgb(0 0 0 / 0.25) 30%, rgb(0 0 0 / 0.25) 70%, #000);
+  }
+}
+.auth__story {
+  display: grid;
+  gap: var(--space-5);
+  max-width: 520px;
+}
+.auth__story h1 {
+  font-size: var(--text-3xl);
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+.auth__perks {
+  list-style: none;
+  display: grid;
+  gap: var(--space-3);
+  padding: 0;
+  margin: 0;
+}
+.auth__perks li {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: start;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--mist-100);
+}
+.auth__perks li span:first-child {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid rgb(216 166 87 / 0.4);
+  color: var(--aura-500);
+  font-size: 12px;
+}
+.auth__perks small {
+  display: block;
+  color: var(--smoke-400);
+  font-size: var(--text-xs);
+}
+
+.auth-card {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  justify-self: center;
+  display: grid;
+  gap: var(--space-5);
+  padding: var(--space-7) var(--space-6);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(160deg, rgb(49 37 29 / 0.78), rgb(26 19 16 / 0.86));
+  border: 1px solid rgb(242 206 147 / 0.14);
+  box-shadow:
+    var(--edge-hi),
+    0 40px 80px -30px rgb(0 0 0 / 0.85),
+    0 0 0 1px rgb(0 0 0 / 0.3);
+  backdrop-filter: blur(18px) saturate(1.2);
+  text-align: center;
+}
+.auth-card::before {
+  /* A slow sweep of light around the card's edge. */
+  content: '';
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(from var(--auth-angle, 0deg), transparent 0 70%, rgb(216 166 87 / 0.7) 85%, transparent 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: auth-orbit 6s linear infinite;
+}
+@property --auth-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes auth-orbit {
+  to {
+    --auth-angle: 360deg;
+  }
+}
+.auth-card h2 {
+  font-size: var(--text-2xl);
+  letter-spacing: -0.02em;
+}
+
+.auth-tabs {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 4px;
+  border-radius: var(--radius-full);
+  background: rgb(18 13 10 / 0.6);
+  border: var(--hairline);
+}
+.auth-tabs button {
+  position: relative;
+  z-index: 1;
+  min-height: 38px;
+  border: 0;
+  background: none;
+  color: var(--smoke-400);
+  font-size: var(--text-sm);
+  font-weight: 550;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: color var(--dur-sm) var(--ease-aura);
+}
+.auth-tabs button[aria-selected='true'] {
+  color: var(--roast-950);
+}
+.auth-tabs__pill {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc(50% - 4px);
+  border-radius: var(--radius-full);
+  background: var(--aura-500);
+  box-shadow: var(--glow-aura);
+  transition: transform var(--dur-md) var(--ease-bloom);
+}
+.auth-tabs[data-tab='signup'] .auth-tabs__pill {
+  transform: translateX(100%);
+}
+.auth-card__panel {
+  display: grid;
+  gap: var(--space-4);
+  animation: stage-swap var(--dur-md) var(--ease-aura) both;
+}
+.auth-card__google {
+  gap: var(--space-3);
+  white-space: nowrap;
+  padding-inline: var(--space-4);
+  background: var(--mist-100);
+  color: var(--roast-950);
+  border-color: var(--mist-100);
+  font-weight: 650;
+}
+.auth-card__google:hover:not(:disabled) {
+  background: #fff;
+  border-color: #fff;
+  transform: translateY(-1px);
+}
+.auth-card__divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--smoke-400);
+}
+.auth-card__divider::before,
+.auth-card__divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgb(242 206 147 / 0.12);
+}
+.auth-card__fine {
+  font-size: 11px;
+  color: var(--smoke-400);
+  line-height: 1.5;
+}
+.auth-card__fine strong {
+  color: var(--mist-100);
+  font-weight: 500;
+}
+
+/* Entrance: story and card arrive in sequence. */
+[data-auth-in] {
+  animation: auth-in 900ms var(--ease-aura) both;
+  animation-delay: calc(var(--d, 0) * 90ms + 150ms);
+}
+@keyframes auth-in {
+  from {
+    opacity: 0;
+    transform: translateY(26px);
+    filter: blur(8px);
+  }
+}
+
+@media (min-width: 960px) {
+  .auth {
+    grid-template-columns: 1.1fr 0.9fr;
+    padding-inline: max(var(--gutter), calc((100vw - 1200px) / 2));
+  }
+  .auth-card {
+    justify-self: end;
+  }
+}
+@media (max-width: 420px) {
+  .auth-card {
+    padding: var(--space-6) var(--space-4);
+  }
+  .auth-card__google {
+    font-size: var(--text-sm);
+  }
+}
+@media (max-width: 959px) {
+  .auth__story {
+    text-align: center;
+    justify-self: center;
+  }
+  .auth__perks {
+    text-align: left;
+  }
+  .auth__backdrop::after {
+    background: radial-gradient(80% 60% at 50% 45%, rgb(18 13 10 / 0.72), rgb(18 13 10 / 0.35));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bean-canvas,
+  .roast-stage__glow {
+    transition: none;
+  }
+  .roast-stage__stage,
+  .auth-card__panel,
+  [data-auth-in],
+  .auth-card::before {
+    animation: none;
+  }
+  .roast-stage {
+    height: auto;
+  }
+  .roast-stage__sticky {
+    position: relative;
+    min-height: 100svh;
+  }
+}
+
+/* ── Inner pages: the persistent ambient field ────────────────────────
+   Behind everything (z -1 sits above the body's painted background and
+   below all page content), one screen tall at the top of the document,
+   fading out downward and away from the left-set headings. `display: none`
+   on excluded routes also stops its render loop — the observer reports it
+   off screen. */
+.ambient {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 105svh;
+  z-index: -1;
+  pointer-events: none;
+  -webkit-mask-image:
+    linear-gradient(180deg, #000 45%, transparent 100%),
+    linear-gradient(90deg, transparent 10%, rgb(0 0 0 / 0.55) 40%, #000 70%);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(180deg, #000 45%, transparent 100%),
+    linear-gradient(90deg, transparent 10%, rgb(0 0 0 / 0.55) 40%, #000 70%);
+  mask-composite: intersect;
+  opacity: 0.55;
+  animation: ambient-in 1.6s var(--ease-aura) both;
+}
+.ambient[data-off] {
+  display: none;
+}
+@keyframes ambient-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (max-width: 639px) {
+  .ambient {
+    height: 70svh;
+    opacity: 0.45;
+    -webkit-mask-image: linear-gradient(180deg, #000 30%, transparent 100%);
+    mask-image: linear-gradient(180deg, #000 30%, transparent 100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ambient {
+    animation: none;
+  }
+}
+
+/* "Sign in to place your order — your cart is saved." */
+.auth-card__reason {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-full);
+  border: 1px solid rgb(216 166 87 / 0.35);
+  background: rgb(216 166 87 / 0.08);
+  color: var(--aura-300);
+  font-size: var(--text-xs);
+  animation: stage-swap var(--dur-md) var(--ease-aura) both;
+}
+.auth-card__reason span {
+  font-size: 10px;
+}
+.auth-gate {
+  display: grid;
+  gap: var(--space-3);
+}

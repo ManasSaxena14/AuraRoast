@@ -14,7 +14,7 @@
  * images, and no scroll hijacking. Reduced motion takes the same observer at
  * every width: the beats are the content, so they must still advance.
  */
-import Image from 'next/image';
+import Image from '@/components/ui/SmartImage';
 import { useCallback, useRef, useState } from 'react';
 import { ScrollTrigger, gsap, useGSAP } from './gsap';
 

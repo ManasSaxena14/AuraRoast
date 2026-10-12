@@ -9,7 +9,9 @@
  * cannot both win. The 409 you may see here is that guard doing its job.
  */
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { SessionContext } from 'next-auth/react';
+import { loginHref, useAuthGate } from '@/components/auth/useAuthGate';
 import { formatMoney } from '@/domain/money';
 import { MAX_PARTY_SIZE, bookableDates, dateKeyToUtc } from '@/domain/slots';
 import { Reveal } from '@/components/motion/Reveal';
@@ -70,6 +72,9 @@ export function Reserve({ stores }: { stores: Store[] }) {
 
   const [loadFailed, setLoadFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+
+  /* Booking needs an account; browsing the grid never does. */
+  const gate = useAuthGate();
 
   /* Signed in: name and email go in once, and stay editable. */
   const session = useContext(SessionContext);
@@ -152,6 +157,10 @@ export function Reserve({ stores }: { stores: Store[] }) {
           }),
         });
         const data = await res.json();
+        if (res.status === 401) {
+          window.location.href = loginHref('/reservations');
+          return;
+        }
         if (!res.ok) {
           // 409 here is the atomic capacity check refusing to overbook (§9.2).
           setError(data.error ?? 'That did not go through.');
@@ -414,9 +423,23 @@ export function Reserve({ stores }: { stores: Store[] }) {
           </p>
         ) : null}
 
-        <Button type="submit" variant="primary" block loading={busy} disabled={!selected}>
-          {selected ? 'Hold the table' : 'Pick a time first'}
-        </Button>
+        {gate === 'out' ? (
+          <div className="auth-gate">
+            <Link href={loginHref('/reservations')} className="btn btn--primary btn--block">
+              {selected ? 'Sign in to hold this table' : 'Sign in to book'}
+            </Link>
+            <p className="muted" style={{ fontSize: 'var(--text-xs)', textAlign: 'center' }}>
+              Bookings live on your account — so you can see, change or cancel them anywhere.{' '}
+              <Link href={loginHref('/reservations', 'signup')} className="link-inline">
+                New here? Create an account
+              </Link>
+            </p>
+          </div>
+        ) : (
+          <Button type="submit" variant="primary" block loading={busy} disabled={!selected || gate === 'loading'}>
+            {selected ? 'Hold the table' : 'Pick a time first'}
+          </Button>
+        )}
         <p className="muted" style={{ fontSize: 11 }}>
           Capacity is checked in a single atomic statement, so a slot cannot be double-booked. If
           someone beats you to the last seat you will be told immediately, not after.

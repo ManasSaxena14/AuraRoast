@@ -23,7 +23,9 @@ const schema = z.object({
 
   // AI Barista (§6.5) — free tier
   GROQ_API_KEY: z.string().optional(),
-  GROQ_MODEL: z.string().default('llama-3.3-70b-versatile'),
+  // llama-3.3-70b-versatile was retired by Groq; gpt-oss-120b is its
+  // tool-calling successor. services/chat.ts also falls back on its own.
+  GROQ_MODEL: z.string().default('openai/gpt-oss-120b'),
 
   // Merchant details are configuration, not secrets (§8.2)
   UPI_ID: z.string().default('auratoast@upi'),

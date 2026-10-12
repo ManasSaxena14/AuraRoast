@@ -109,7 +109,10 @@ export function Stepper({
       <button type="button" onClick={() => onChange(value - 1)} disabled={value <= min} aria-label={`Fewer ${label}`}>
         −
       </button>
-      <span aria-live="polite">{value}</span>
+      {/* Keyed so each change remounts the number and replays its pop. */}
+      <span key={value} className="stepper__value" aria-live="polite">
+        {value}
+      </span>
       <button type="button" onClick={() => onChange(value + 1)} disabled={value >= max} aria-label={`More ${label}`}>
         +
       </button>

@@ -1,4 +1,4 @@
-import Image from 'next/image';
+import Image from '@/components/ui/SmartImage';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
@@ -118,7 +118,7 @@ export default async function DrinkPage({ params }: { params: Promise<{ drinkId:
         <ReviewList drinkId={drink.id} initial={reviews} />
       </section>
 
-      <PairingsSection drinkName={drink.name} />
+      <PairingsSection drinkName={drink.name} drinkSlug={drink.slug} />
     </div>
   );
 }

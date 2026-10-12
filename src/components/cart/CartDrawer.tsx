@@ -7,17 +7,26 @@
  * it (§14.2).
  */
 import Link from 'next/link';
-import Image from 'next/image';
-import { useEffect, useRef, useState } from 'react';
+import Image from '@/components/ui/SmartImage';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatMoney } from '@/domain/money';
 import { describeSelection } from '@/domain/brew-plan';
 import { lockScroll, unlockScroll } from '@/components/motion/SmoothScroll';
 import { Button } from '@/components/ui/Button';
 import { EmptyState, Stepper } from '@/components/ui/bits';
+import { suggestPairings } from '@/data/pairings';
+import { toast } from '@/components/toast/ToastProvider';
+import { loginHref, useAuthGate } from '@/components/auth/useAuthGate';
 import { useCart } from './CartProvider';
 
 export function CartDrawer() {
-  const { isOpen, close, lines, priced, setQuantity, remove, fulfillment, setFulfillment } = useCart();
+  const { isOpen, close, lines, priced, setQuantity, remove, fulfillment, setFulfillment, addLine } = useCart();
+  /* Plates tasted against what is in the cart. Only offered once there is a
+     drink to pair against — a cart of biscuits does not need more biscuits. */
+  const hasDrink = lines.some((l) => !l.lineId.startsWith('pairing-'));
+  // Checking out needs an account; the cart is kept in the browser meanwhile.
+  const gate = useAuthGate();
+  const suggestions = useMemo(() => (hasDrink ? suggestPairings(lines, 3) : []), [hasDrink, lines]);
   const [closing, setClosing] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocus = useRef<HTMLElement | null>(null);
@@ -72,6 +81,10 @@ export function CartDrawer() {
         ref={panelRef}
         className="drawer"
         data-closing={closing || undefined}
+        // Lenis is stopped while the drawer is open, and a stopped Lenis
+        // cancels EVERY wheel event on the page — including the ones meant
+        // to scroll this drawer. This attribute exempts it.
+        data-lenis-prevent
         role="dialog"
         aria-modal="true"
         aria-label="Your cart"
@@ -98,12 +111,16 @@ export function CartDrawer() {
               action={{ href: '/menu', label: 'Open the menu' }}
             />
           ) : (
-            lines.map((line) => {
+            lines.map((line, i) => {
               const pricedLine = priced.lines.find((p) => p.lineId === line.lineId);
               return (
-                <article key={line.lineId} className="cart-line">
+                <article
+                  key={line.lineId}
+                  className="cart-line"
+                  style={{ '--i': i } as React.CSSProperties}
+                >
                   <div className="cart-line__media">
-                    <Image src={line.imageUrl} alt="" width={120} height={120} />
+                    <Image src={line.imageUrl} alt="" width={120} height={120} sizes="68px" />
                   </div>
                   <div className="cart-line__body">
                     <div className="row-between" style={{ alignItems: 'flex-start' }}>
@@ -133,6 +150,43 @@ export function CartDrawer() {
               );
             })
           )}
+
+          {suggestions.length ? (
+            <section className="pair-suggest" aria-label="Goes well with your order">
+              <div className="row-between">
+                <p className="eyebrow" style={{ marginBottom: 0 }}>
+                  Goes well with
+                </p>
+                <Link href="/pairings" onClick={startClose} className="link-arrow" style={{ fontSize: 'var(--text-xs)' }}>
+                  All plates
+                </Link>
+              </div>
+              <div className="pair-suggest__row">
+                {suggestions.map((p, i) => (
+                  <article key={p.id} className="pair-suggest__card" style={{ '--i': i } as React.CSSProperties}>
+                    <div className="pair-suggest__media">
+                      <Image src={p.imageUrl} alt="" width={240} height={180} sizes="120px" />
+                    </div>
+                    <p className="pair-suggest__name">{p.name}</p>
+                    <div className="row-between" style={{ gap: 6 }}>
+                      <span className="mono pair-suggest__price">{formatMoney(p.price)}</span>
+                      <button
+                        type="button"
+                        className="pair-suggest__add"
+                        aria-label={`Add ${p.name}`}
+                        onClick={() => {
+                          addLine({ id: p.id, slug: p.slug, name: p.name, imageUrl: p.imageUrl, price: p.price });
+                          toast(`${p.name} added`, 'success');
+                        }}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
         </div>
 
         {lines.length > 0 ? (
@@ -177,9 +231,18 @@ export function CartDrawer() {
             <p className="muted" style={{ fontSize: 11 }}>
               Re-priced on the server before checkout. This number is a preview.
             </p>
-            <Link href="/checkout" onClick={startClose} className="btn btn--primary btn--block btn--lg">
-              Checkout
+            <Link
+              href={gate === 'out' ? loginHref('/checkout') : '/checkout'}
+              onClick={startClose}
+              className="btn btn--primary btn--block btn--lg"
+            >
+              {gate === 'out' ? 'Sign in to check out' : 'Checkout'}
             </Link>
+            {gate === 'out' ? (
+              <p className="muted" style={{ fontSize: 11, textAlign: 'center' }}>
+                Your cart is saved — it will be right here after you sign in.
+              </p>
+            ) : null}
           </footer>
         ) : null}
       </aside>

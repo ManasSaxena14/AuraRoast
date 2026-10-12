@@ -420,3 +420,10 @@
     animation: none;
   }
 }
+
+/* Layers for the velocity skew, created once while the effect is running
+   (components/motion/ScrollSkew.tsx sets the flag). In CSS, not inline, so
+   hydration never sees an attribute React did not render. */
+html[data-skew-layers='on'] [data-skew] {
+  will-change: transform;
+}

@@ -169,7 +169,7 @@ export function Barista({ drinks, modifiers }: { drinks: Drink[]; modifiers: Mod
       </button>
 
       {open ? (
-        <section ref={panelRef} className="barista" role="dialog" aria-modal="true" aria-label="AI Barista">
+        <section ref={panelRef} className="barista" data-lenis-prevent role="dialog" aria-modal="true" aria-label="AI Barista">
           <header className="barista__head row-between" style={{ padding: 'var(--space-4) var(--space-5)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
               <div

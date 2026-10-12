@@ -462,6 +462,9 @@
 }
 .drawer__body {
   flex: 1;
+  /* A flex child's min-height defaults to its content, so without this the
+     body grows past the viewport instead of scrolling inside it. */
+  min-height: 0;
   overflow-y: auto;
   padding: var(--space-5);
   display: flex;

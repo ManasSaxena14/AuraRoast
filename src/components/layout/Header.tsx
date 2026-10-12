@@ -53,6 +53,19 @@ export function Header() {
 
   useEffect(() => setMenuOpen(false), [pathname]);
 
+  /* The cup answers every add: a bump, and the number added floats off it.
+     Keyed so two adds in a row replay the animation instead of merging. */
+  const prevCount = useRef<number | null>(null);
+  const [bump, setBump] = useState<{ key: number; delta: number } | null>(null);
+  useEffect(() => {
+    const before = prevCount.current;
+    prevCount.current = count;
+    if (before === null || count <= before) return;
+    setBump({ key: Date.now(), delta: count - before });
+    const t = setTimeout(() => setBump(null), 900);
+    return () => clearTimeout(t);
+  }, [count]);
+
   return (
     <header className="header" data-scrolled={scrolled || undefined}>
       {/* Announcement bar — dismissible, never required. No role="banner":
@@ -93,7 +106,12 @@ export function Header() {
         <div className="header__actions">
           <ScrollProgress />
           <AccountLink className="btn btn--ghost btn--sm header__account" />
-          <button className="cart-button" onClick={open} aria-label={`Open cart, ${count} items`}>
+          <button
+            className="cart-button"
+            onClick={open}
+            aria-label={`Open cart, ${count} items`}
+            data-bump={bump ? bump.key % 2 : undefined}
+          >
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
               <path
                 d="M4 7h16l-1.4 11.2a2 2 0 0 1-2 1.8H7.4a2 2 0 0 1-2-1.8L4 7Zm4 0V5.5a4 4 0 0 1 8 0V7"
@@ -105,8 +123,19 @@ export function Header() {
             </svg>
             {/* The cup fills as items are added — the one place the overshoot
                 curve is unambiguously correct (Part 15). */}
-            <span className="cart-button__fill" style={{ transform: `scaleY(${Math.min(1, count / 6)})` }} />
-            {count > 0 ? <span className="cart-button__count mono">{count}</span> : null}
+            <span className="cart-button__clip" aria-hidden="true">
+              <span className="cart-button__fill" style={{ transform: `scaleY(${Math.min(1, count / 6)})` }} />
+            </span>
+            {count > 0 ? (
+              <span key={count} className="cart-button__count mono">
+                {count}
+              </span>
+            ) : null}
+            {bump ? (
+              <span key={bump.key} className="cart-button__plus mono" aria-hidden="true">
+                +{bump.delta}
+              </span>
+            ) : null}
           </button>
           <button
             className="header__burger"

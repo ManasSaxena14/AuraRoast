@@ -11,7 +11,7 @@
  * scroll-snap carousel. Pinned horizontal scroll on a phone is a usability
  * trap, not a fallback.
  */
-import Image from 'next/image';
+import Image from '@/components/ui/SmartImage';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -96,6 +96,8 @@ export function OriginsExperience({
           markers={markers}
           focus={focus}
           focusZoom={9}
+          terrain
+          zoomPosition="topleft"
           onSelect={(id) => select(origins.findIndex((o) => o.slug === id))}
           ariaLabel="Map of the five origins"
         />

@@ -136,7 +136,8 @@ async function runTool(name: string, args: Record<string, unknown>) {
         added: true,
         drinkSlug: drink.slug,
         drinkName: drink.name,
-        quantity: Number(args.quantity ?? 1) || 1,
+        // The model chooses this number; the cart and the order API cap a line at 20.
+        quantity: Math.min(20, Math.max(1, Math.floor(Number(args.quantity ?? 1)) || 1)),
         price: formatMoney(drink.basePrice),
       };
     }
@@ -187,7 +188,54 @@ function scoreDrink(d: Drink, q: string): number {
 }
 
 /* ── Groq (free tier) ────────────────────────────────────────────────── */
+export class GroqError extends Error {
+  readonly status: number;
+  constructor(status: number, detail: string) {
+    super(`groq ${status}: ${detail}`);
+    this.name = 'GroqError';
+    this.status = status;
+  }
+}
+
+/**
+ * `withTools: false` still SENDS the tool definitions, with `tool_choice:
+ * 'none'`: once the conversation holds a tool call, an OpenAI-compatible API
+ * may reject a request that no longer declares the tools it refers to.
+ */
+/**
+ * Groq retires models (llama-3.3-70b-versatile went, and with it every
+ * Barista reply). If the configured model is gone, the next tool-capable one
+ * is tried and remembered for the life of the instance — a stale GROQ_MODEL
+ * in a dashboard must not quietly downgrade the Barista to the local responder.
+ */
+const MODEL_FALLBACKS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+let workingModel: string | null = null;
+
+function modelCandidates(): string[] {
+  return [...new Set([workingModel, env.GROQ_MODEL, ...MODEL_FALLBACKS].filter(Boolean) as string[])];
+}
+
 async function groqComplete(messages: unknown[], withTools: boolean) {
+  let last: unknown;
+  for (const model of modelCandidates()) {
+    try {
+      const out = await groqRequest(model, messages, withTools);
+      if (workingModel !== model) {
+        if (model !== env.GROQ_MODEL) console.warn(`[barista] GROQ_MODEL "${env.GROQ_MODEL}" unavailable; using ${model}`);
+        workingModel = model;
+      }
+      return out;
+    } catch (err) {
+      last = err;
+      // Only a missing model moves on to the next one; a bad key or a rate
+      // limit would fail the same way for every model.
+      if (!(err instanceof GroqError && (err.status === 404 || /model_not_found|decommissioned/.test(err.message)))) throw err;
+    }
+  }
+  throw last;
+}
+
+async function groqRequest(model: string, messages: unknown[], withTools: boolean) {
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -195,15 +243,21 @@ async function groqComplete(messages: unknown[], withTools: boolean) {
       Authorization: `Bearer ${env.GROQ_API_KEY}`,
     },
     body: JSON.stringify({
-      model: env.GROQ_MODEL,
+      model,
       messages,
       temperature: 0.6,
       max_tokens: 420,
-      ...(withTools ? { tools: TOOLS, tool_choice: 'auto' } : {}),
+      tools: TOOLS,
+      tool_choice: withTools ? 'auto' : 'none',
     }),
     signal: AbortSignal.timeout(20_000),
   });
-  if (!res.ok) throw new Error(`groq ${res.status}`);
+  if (!res.ok) {
+    // The body says WHY — a bad key, a retired model, a rate limit. Without it
+    // every failure looked the same: the local responder quietly took over.
+    const detail = (await res.text().catch(() => '')).slice(0, 300);
+    throw new GroqError(res.status, detail);
+  }
   return (await res.json()) as {
     choices: {
       message: {
@@ -229,14 +283,39 @@ export async function askBarista(history: ChatMessage[], userText: string): Prom
     try {
       const messages: Record<string, unknown>[] = [
         { role: 'system', content: SYSTEM_PROMPT },
-        ...history.slice(-8).map((m) => ({ role: m.role, content: m.content })),
+        // Only the guest's and the Barista's own turns. The history arrives
+        // from the browser: a `system` turn there would rewrite the prompt,
+        // and a `tool` turn with no matching call makes Groq reject the
+        // whole request.
+        ...history
+          .filter((m) => m.role === 'user' || m.role === 'assistant')
+          .slice(-8)
+          .map((m) => ({ role: m.role, content: m.content })),
         { role: 'user', content: userText },
       ];
 
-      const first = await groqComplete(messages, true);
-      const choice = first.choices[0].message;
+      // A request like "something cold — add one" takes TWO rounds of tools
+      // (search, then add). One round with tools and a forced text-only reply
+      // made Groq reject the second call outright, so the Barista fell back to
+      // the local responder exactly when it was most useful. Loop instead,
+      // and only forbid tools on the very last round.
+      const MAX_ROUNDS = 4;
+      for (let round = 0; round < MAX_ROUNDS; round++) {
+        const lastRound = round === MAX_ROUNDS - 1;
+        const res = await groqComplete(messages, !lastRound);
+        const choice = res.choices[0].message;
 
-      if (choice.tool_calls?.length) {
+        if (!choice.tool_calls?.length || lastRound) {
+          return {
+            reply:
+              choice.content?.trim() ||
+              (toolsUsed.length ? 'Here is what I found.' : 'Ask me for something and I will find it on the bar.'),
+            action,
+            toolsUsed,
+            source: 'groq',
+          };
+        }
+
         messages.push({ role: 'assistant', content: choice.content ?? '', tool_calls: choice.tool_calls });
         for (const call of choice.tool_calls) {
           const args = safeJson(call.function.arguments);
@@ -246,29 +325,13 @@ export async function askBarista(history: ChatMessage[], userText: string): Prom
             const r = result as { drinkSlug: string; drinkName: string; quantity: number };
             action = { kind: 'add_to_cart', drinkSlug: r.drinkSlug, drinkName: r.drinkName, quantity: r.quantity };
           }
-          messages.push({
-            role: 'tool',
-            tool_call_id: call.id,
-            content: JSON.stringify(result),
-          });
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
         }
-        const second = await groqComplete(messages, false);
-        return {
-          reply: second.choices[0].message.content?.trim() || 'Here is what I found.',
-          action,
-          toolsUsed,
-          source: 'groq',
-        };
       }
-
-      return {
-        reply: choice.content?.trim() || 'Ask me for something and I will find it on the bar.',
-        action: null,
-        toolsUsed,
-        source: 'groq',
-      };
-    } catch {
-      /* fall through to the local responder — a chat outage is not an outage */
+    } catch (err) {
+      // Fall through to the local responder — a chat outage is not an
+      // outage — but say so in the logs, or a broken key goes unnoticed.
+      console.warn('[barista] Groq failed, using the local responder:', err instanceof Error ? err.message : err);
     }
   }
 
@@ -351,3 +414,47 @@ export const BARISTA_SUGGESTIONS = [
   'What is dairy-free?',
   'Book me a table',
 ] as const;
+
+/**
+ * Is the Groq integration actually usable? Lists the account's models with
+ * the configured key and confirms the configured model is among them, so a
+ * wrong key or a retired model shows up here instead of as a quietly
+ * downgraded Barista. Never returns the key.
+ */
+export async function checkGroq(): Promise<{
+  configured: boolean;
+  ok: boolean;
+  model: string;
+  status?: number;
+  detail?: string;
+}> {
+  const model = env.GROQ_MODEL;
+  if (!features.groq) {
+    return { configured: false, ok: false, model, detail: 'GROQ_API_KEY is not set — the local responder is answering.' };
+  }
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { Authorization: `Bearer ${env.GROQ_API_KEY}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) {
+      return { configured: true, ok: false, model, status: res.status, detail: (await res.text()).slice(0, 300) };
+    }
+    const data = (await res.json()) as { data?: { id: string }[] };
+    const ids = new Set((data.data ?? []).map((m) => m.id));
+    const usable = modelCandidates().find((m) => ids.has(m));
+    return {
+      configured: true,
+      ok: Boolean(usable),
+      model: usable ?? model,
+      status: res.status,
+      detail: !usable
+        ? `Key accepted, but none of ${modelCandidates().join(', ')} is offered — set GROQ_MODEL.`
+        : usable === model
+          ? 'Key accepted and model available.'
+          : `Key accepted. GROQ_MODEL "${model}" is retired; replies use ${usable}. Update GROQ_MODEL to silence this.`,
+    };
+  } catch (err) {
+    return { configured: true, ok: false, model, detail: err instanceof Error ? err.message : String(err) };
+  }
+}

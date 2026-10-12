@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import Image from 'next/image';
+import Image from '@/components/ui/SmartImage';
 import Link from 'next/link';
 import { PAIRINGS, PAIRING_BY_ID } from '@/data/pairings';
 import { formatMoney } from '@/domain/money';

@@ -1,4 +1,4 @@
-import Image from 'next/image';
+import Image from '@/components/ui/SmartImage';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { CITIES, STORES, storesByCity } from '@/data/stores';
@@ -242,8 +242,13 @@ export default function LocationsPage() {
                             </div>
                           ))}
                         </dl>
-                        <a className="loc-room__tel mono" href={`tel:${s.phone.replace(/\s/g, '')}`}>
-                          {s.phone}
+                        <a
+                          className="loc-room__tel mono"
+                          href={`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Directions →
                         </a>
                       </li>
                     ))}

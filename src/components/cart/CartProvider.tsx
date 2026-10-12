@@ -164,7 +164,9 @@ export function CartProvider({
     [lines, catalogueMap, modifierIndex, fulfillment, tip, promoCode],
   );
 
-  const add = useCallback((drink: Drink, modifiers: SelectedModifier[], quantity = 1) => {
+  const add = useCallback((drink: Drink, modifiers: SelectedModifier[], requested = 1) => {
+    // Every caller is clamped here — the Barista's number comes from a model.
+    const quantity = Math.min(20, Math.max(1, Math.floor(requested) || 1));
     const key = lineKey(drink.id, modifiers);
     setLines((prev) => {
       const existing = prev.find((l) => l.lineId === key);
@@ -189,7 +191,8 @@ export function CartProvider({
   }, []);
 
   /** Add a standalone item (e.g. a pairing) without constructing a full Drink. */
-  const addLine = useCallback((line: { id: string; slug: string; name: string; imageUrl: string; price: number }, quantity = 1) => {
+  const addLine = useCallback((line: { id: string; slug: string; name: string; imageUrl: string; price: number }, requested = 1) => {
+    const quantity = Math.min(20, Math.max(1, Math.floor(requested) || 1));
     const key = `pairing-${line.id}`;
     setLines((prev) => {
       const existing = prev.find((l) => l.lineId === key);

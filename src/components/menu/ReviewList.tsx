@@ -1,5 +1,8 @@
 'use client';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useState } from 'react';
+import { loginHref, useAuthGate } from '@/components/auth/useAuthGate';
 import { Reveal } from '@/components/motion/Reveal';
 import { Button } from '@/components/ui/Button';
 import { Field, TextareaField } from '@/components/ui/Field';
@@ -18,6 +21,20 @@ export function ReviewList({ drinkId, initial }: { drinkId: string; initial: Rev
   const [body, setBody] = useState('');
   const [rating, setRating] = useState(5);
   const [busy, setBusy] = useState(false);
+  const gate = useAuthGate();
+  const pathname = usePathname();
+
+  /** Writing needs an account; reading never does. */
+  const writeButton = (label: string, size?: 'sm') =>
+    gate === 'out' ? (
+      <Link href={loginHref(pathname)} className={`btn btn--outline${size ? ' btn--sm' : ''}`}>
+        Sign in to write a review
+      </Link>
+    ) : (
+      <Button size={size} disabled={gate === 'loading'} onClick={() => setWriting(true)}>
+        {label}
+      </Button>
+    );
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,6 +46,10 @@ export function ReviewList({ drinkId, initial }: { drinkId: string; initial: Rev
         body: JSON.stringify({ drinkId, author, rating, body }),
       });
       const data = await res.json();
+      if (res.status === 401) {
+        window.location.href = loginHref(pathname);
+        return;
+      }
       if (!res.ok) {
         toast(data.error ?? 'That did not go through.', 'error');
         return;
@@ -48,7 +69,7 @@ export function ReviewList({ drinkId, initial }: { drinkId: string; initial: Rev
       <div className="stack">
         <EmptyState title="Nobody has said anything yet." body="Be the first. Two sentences is plenty." />
         <div className="row" style={{ justifyContent: 'center' }}>
-          <Button onClick={() => setWriting(true)}>Write one</Button>
+          {writeButton('Write one')}
         </div>
       </div>
     );
@@ -59,7 +80,14 @@ export function ReviewList({ drinkId, initial }: { drinkId: string; initial: Rev
       {writing ? (
         <form className="card stack" onSubmit={submit}>
           <div className="field-row">
-            <Field label="Your name" value={author} onChange={(e) => setAuthor(e.target.value)} required maxLength={40} />
+            <Field
+              label="Shown as"
+              value={author}
+              onChange={(e) => setAuthor(e.target.value)}
+              maxLength={40}
+              placeholder="Your account name"
+              hint="Leave blank to use your account name"
+            />
             <div className="field">
               <span className="field__label">Rating</span>
               <div className="row" style={{ gap: 'var(--space-2)' }}>
@@ -90,9 +118,7 @@ export function ReviewList({ drinkId, initial }: { drinkId: string; initial: Rev
         </form>
       ) : (
         <div className="row">
-          <Button size="sm" onClick={() => setWriting(true)}>
-            Write a review
-          </Button>
+          {writeButton('Write a review', 'sm')}
         </div>
       )}
 

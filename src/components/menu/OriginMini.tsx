@@ -48,13 +48,23 @@ export function OriginMini({ origin }: { origin: Origin }) {
         </div>
 
         {/* The box is reserved before Leaflet loads — the CLS rule (§16.2). */}
-        <div style={{ aspectRatio: '16 / 9', borderRadius: 'var(--radius-sm)', overflow: 'hidden', background: 'var(--roast-900)' }}>
+        <div className="origin-mini__map">
           {inView ? (
             <MapCanvas
               center={{ lat: origin.lat, lng: origin.lng }}
-              zoom={9}
+              zoom={8}
               interactive={false}
-              markers={[{ id: origin.id, lat: origin.lat, lng: origin.lng, kind: 'origin', active: true }]}
+              terrain
+              markers={[
+                {
+                  id: origin.id,
+                  lat: origin.lat,
+                  lng: origin.lng,
+                  kind: 'origin',
+                  active: true,
+                  label: `${origin.name.split(',')[0]} · ${origin.altitudeM}m`,
+                },
+              ]}
               ariaLabel={`Map showing ${origin.name}`}
             />
           ) : null}

@@ -1,0 +1,602 @@
+/* ═══════════════════════════════════════════════════════════════
+   Polish — the small motion that makes the large motion feel finished.
+
+   Every rule here is ADDITIVE: it never redefines a `transition` an existing
+   component owns (keyframe animations are used instead, so a card's hover
+   zoom and an image's arrival never clobber each other). Every animation is
+   switched off under `prefers-reduced-motion` at the bottom of the file.
+   Easing and duration come from tokens.css — no curves are defined here.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Images: shimmer while loading, then develop like a print ─────── */
+img.img-smart[data-state='loading'] {
+  opacity: 0;
+}
+img.img-smart[data-state='loaded'] {
+  animation: img-develop 900ms var(--ease-aura) both;
+}
+@keyframes img-develop {
+  from {
+    opacity: 0;
+    filter: blur(14px) saturate(0.6);
+  }
+  60% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    filter: none;
+  }
+}
+/* The box an image is loading into shimmers — no extra markup, the parent is
+   found with :has(). Browsers without :has() simply show the plain box. */
+:where(*):has(> img.img-smart[data-state='loading']) {
+  background-image: linear-gradient(
+    100deg,
+    rgb(242 206 147 / 0) 30%,
+    rgb(242 206 147 / 0.07) 50%,
+    rgb(242 206 147 / 0) 70%
+  );
+  background-size: 220% 100%;
+  animation: img-shimmer 1.3s linear infinite;
+}
+@keyframes img-shimmer {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
+/* ── Route progress — a hairline of light while the next page loads ── */
+.nav-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: calc(var(--z-toast) + 1);
+  pointer-events: none;
+  transform-origin: left;
+  transform: scaleX(0);
+  opacity: 0;
+  background: linear-gradient(90deg, var(--terra-600), var(--aura-500) 60%, var(--aura-300));
+  box-shadow: 0 0 12px rgb(216 166 87 / 0.6);
+}
+.nav-progress[data-state='loading'] {
+  opacity: 1;
+  animation: nav-creep 8s var(--ease-creep) forwards;
+}
+.nav-progress[data-state='done'] {
+  opacity: 0;
+  transform: scaleX(1);
+  transition:
+    transform var(--dur-sm) var(--ease-aura),
+    opacity var(--dur-md) var(--ease-aura) 160ms;
+}
+@keyframes nav-creep {
+  0% {
+    transform: scaleX(0);
+  }
+  15% {
+    transform: scaleX(0.35);
+  }
+  100% {
+    transform: scaleX(0.9);
+  }
+}
+
+/* ── Cart button: the cup answers every add ───────────────────────── */
+.cart-button {
+  overflow: visible; /* the fill clips itself now, so the "+1" can fly */
+}
+.cart-button__clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+}
+.cart-button[data-bump='0'] {
+  animation: cart-bump-a 620ms var(--ease-bloom);
+}
+.cart-button[data-bump='1'] {
+  animation: cart-bump-b 620ms var(--ease-bloom);
+}
+@keyframes cart-bump-a {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.18) rotate(-6deg); box-shadow: var(--glow-aura-strong); }
+  60% { transform: scale(0.96) rotate(3deg); }
+  100% { transform: scale(1); }
+}
+@keyframes cart-bump-b {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.18) rotate(-6deg); box-shadow: var(--glow-aura-strong); }
+  60% { transform: scale(0.96) rotate(3deg); }
+  100% { transform: scale(1); }
+}
+.cart-button__count {
+  animation: count-pop 420ms var(--ease-bloom);
+}
+@keyframes count-pop {
+  from {
+    transform: scale(0.3);
+  }
+}
+.cart-button__plus {
+  position: absolute;
+  left: 50%;
+  top: -4px;
+  z-index: 3;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--aura-300);
+  text-shadow: 0 0 10px rgb(216 166 87 / 0.7);
+  pointer-events: none;
+  animation: plus-float 900ms var(--ease-aura) forwards;
+}
+@keyframes plus-float {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px) scale(0.6);
+  }
+  25% {
+    opacity: 1;
+    transform: translate(-50%, -8px) scale(1.1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -26px) scale(0.9);
+  }
+}
+
+/* ── Drawer: lines and suggestions arrive in order ────────────────── */
+.drawer .cart-line {
+  animation: line-in var(--dur-lg) var(--ease-aura) both;
+  animation-delay: calc(min(var(--i, 0), 8) * 45ms + 120ms);
+}
+@keyframes line-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+.pair-suggest {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  border: var(--hairline);
+  border-radius: var(--radius-md);
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgb(216 166 87 / 0.08), transparent 60%),
+    var(--roast-800);
+  animation: line-in var(--dur-lg) var(--ease-aura) both 260ms;
+}
+.pair-suggest__row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.pair-suggest__card {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+  animation: suggest-in var(--dur-lg) var(--ease-bloom) both;
+  animation-delay: calc(var(--i, 0) * 70ms + 340ms);
+}
+@keyframes suggest-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.94);
+  }
+}
+.pair-suggest__media {
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--roast-900);
+}
+.pair-suggest__media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--dur-lg) var(--ease-aura);
+}
+.pair-suggest__card:hover .pair-suggest__media img {
+  transform: scale(1.08);
+}
+.pair-suggest__name {
+  font-size: 12px;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pair-suggest__price {
+  font-size: 11px;
+  color: var(--aura-500);
+}
+.pair-suggest__add {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgb(216 166 87 / 0.5);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--aura-500);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background var(--dur-sm) var(--ease-aura),
+    color var(--dur-sm) var(--ease-aura),
+    transform var(--dur-sm) var(--ease-bloom);
+}
+.pair-suggest__add:hover {
+  background: var(--aura-500);
+  color: var(--roast-950);
+  transform: rotate(90deg) scale(1.1);
+}
+.pair-suggest__add:active {
+  transform: rotate(90deg) scale(0.9);
+}
+
+/* ── Drink page pairings ──────────────────────────────────────────── */
+.pairings-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+}
+.pairings-head .eyebrow {
+  margin-bottom: 0;
+}
+.pairings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: var(--space-4);
+}
+.pairing-card[data-best='true'] {
+  border-color: rgb(216 166 87 / 0.38);
+  box-shadow: var(--glow-aura);
+}
+.pairing-card__flag {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: 1;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  background: var(--aura-500);
+  color: var(--roast-950);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: 0 4px 16px -4px rgb(0 0 0 / 0.6);
+}
+
+/* ── Checkout PIN field ───────────────────────────────────────────── */
+.pin-field {
+  display: grid;
+  gap: var(--space-2);
+}
+.pin-field .input {
+  font-family: var(--font-mono), monospace;
+  letter-spacing: 0.3em;
+  max-width: 220px;
+}
+.pin-field[data-status='checking'] .field__hint {
+  animation: halo-pulse 1.2s var(--ease-aura) infinite;
+}
+.pin-field__area {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--mist-100);
+  animation: line-in var(--dur-md) var(--ease-aura) both;
+}
+.pin-field__area strong {
+  color: var(--aura-300);
+}
+.pin-field__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--verdant-500);
+  box-shadow: 0 0 0 4px rgb(108 143 106 / 0.2);
+  animation: halo-pulse 1.8s var(--ease-aura) infinite;
+}
+
+/* ── Live tracking ────────────────────────────────────────────────── */
+.track__map {
+  position: relative;
+}
+.track__live-badge {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: 500; /* above Leaflet's panes */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 8px;
+  border-radius: var(--radius-full);
+  background: rgb(18 13 10 / 0.78);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgb(242 206 147 / 0.2);
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mist-100);
+  pointer-events: none;
+}
+.track__live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e5484d;
+  box-shadow: 0 0 0 0 rgb(229 72 77 / 0.6);
+  animation: live-ping 1.6s var(--ease-aura) infinite;
+}
+.track__live-badge[data-settled='true'] .track__live-dot {
+  background: var(--verdant-500);
+  animation: none;
+}
+@keyframes live-ping {
+  0% {
+    box-shadow: 0 0 0 0 rgb(229 72 77 / 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgb(229 72 77 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(229 72 77 / 0);
+  }
+}
+.track__dest {
+  background: var(--roast-800);
+  border: var(--hairline);
+  padding: var(--space-4);
+}
+.track__pin {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgb(216 166 87 / 0.35);
+  color: var(--aura-300);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+
+/* ── Buttons: a sheen crosses the primary on hover ─────────────────── */
+.btn--primary {
+  overflow: hidden;
+}
+.btn--primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(110deg, transparent 30%, rgb(255 255 255 / 0.35) 50%, transparent 70%);
+  transform: translateX(-120%);
+  pointer-events: none;
+}
+.btn--primary:hover:not(:disabled)::after {
+  animation: btn-sheen 900ms var(--ease-aura);
+}
+@keyframes btn-sheen {
+  to {
+    transform: translateX(120%);
+  }
+}
+
+/* ── Chips settle with a little overshoot when chosen ──────────────── */
+.chip[data-active='true'] {
+  animation: chip-pick var(--dur-md) var(--ease-bloom);
+}
+@keyframes chip-pick {
+  from {
+    transform: scale(0.92);
+  }
+}
+
+/* ── Toasts arrive with a touch more life ──────────────────────────── */
+.toast--success .toast__glyph {
+  display: inline-block;
+  animation: glyph-spin 600ms var(--ease-bloom);
+}
+@keyframes glyph-spin {
+  from {
+    transform: scale(0) rotate(-180deg);
+  }
+}
+
+/* ── Inline links: an underline that draws in from the left ───────── */
+.link-arrow,
+.footer__link {
+  background-image: linear-gradient(currentColor, currentColor);
+  background-size: 0% 1px;
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  transition: background-size var(--dur-md) var(--ease-aura);
+}
+.link-arrow:hover,
+.footer__link:hover {
+  background-size: 100% 1px;
+}
+
+/* ── Selection and focus, in the brand's own light ─────────────────── */
+::selection {
+  background: rgb(216 166 87 / 0.35);
+  color: var(--mist-100);
+}
+:focus-visible {
+  transition: outline-offset var(--dur-sm) var(--ease-bloom);
+}
+
+/* ── Spotlight: light that follows the pointer across cards ──────────
+   Positioned by components/motion/Spotlight.tsx. Shown only on hover, on
+   devices that have one; `isolation` keeps the glow under card content. */
+@media (hover: hover) and (pointer: fine) {
+  :is(.drink-card, .pairing, .store-row) {
+    isolation: isolate;
+  }
+  .store-row {
+    position: relative; /* the only one of the three not already positioned */
+  }
+  :is(.drink-card, .pairing, .store-row)::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    background: radial-gradient(
+      320px circle at var(--mx, 50%) var(--my, 50%),
+      rgb(242 206 147 / 0.09),
+      transparent 65%
+    );
+    transition: opacity var(--dur-md) var(--ease-aura);
+  }
+  :is(.drink-card, .pairing, .store-row):hover::after {
+    opacity: 1;
+  }
+}
+
+/* ── Stepper: the number pops when it changes ──────────────────────── */
+.stepper__value {
+  display: inline-block;
+  animation: count-pop var(--dur-md) var(--ease-bloom);
+}
+
+/* ── Drink page: the "Grown at" map ───────────────────────────────── */
+.origin-mini__map {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--roast-900);
+}
+
+/* ── /origins: the map as a stage ─────────────────────────────────── */
+.origins-map {
+  /* Its overlays use z-index 500 to clear Leaflet's panes. Without its own
+     stacking context they also cleared the site header (z 60) and dimmed it. */
+  isolation: isolate;
+  z-index: 0;
+}
+.origins-map .leaflet-top {
+  top: calc(var(--header-h) + var(--announce-h) + var(--space-4));
+}
+.origins-map::before {
+  /* The header and announcement bar read over the map, not into it. */
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: calc(var(--header-h) + var(--announce-h) + var(--space-8));
+  z-index: 500;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgb(18 13 10 / 0.92), rgb(18 13 10 / 0.5) 55%, transparent);
+}
+.origins-map .map-shell {
+  position: absolute;
+  inset: 0;
+}
+.origins-map__legend {
+  padding: var(--space-3) var(--space-4);
+  border: var(--hairline);
+  border-radius: var(--radius-md);
+  background: rgb(18 13 10 / 0.72);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 18px 40px -20px rgb(0 0 0 / 0.8);
+  animation: line-in var(--dur-lg) var(--ease-aura) both 300ms;
+}
+.origins-map__legend-item {
+  position: relative;
+  padding-right: 16px !important;
+  transition:
+    color var(--dur-sm) var(--ease-aura),
+    transform var(--dur-md) var(--ease-aura);
+}
+.origins-map__legend-item:hover {
+  color: var(--mist-100);
+  transform: translateX(-3px);
+}
+.origins-map__legend-item[data-active]::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: var(--aura-500);
+  box-shadow: 0 0 0 3px rgb(216 166 87 / 0.2);
+  animation: halo-pulse 1.8s var(--ease-aura) infinite;
+}
+.origins-map__overlay h1 {
+  text-shadow: 0 4px 30px rgb(0 0 0 / 0.6);
+}
+@media (max-width: 639px) {
+  .origins-map__legend {
+    top: auto;
+    bottom: var(--space-4);
+    right: var(--space-4);
+    left: var(--space-4);
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-1) var(--space-3);
+  }
+  .origins-map__overlay {
+    padding-bottom: calc(var(--space-9) + var(--space-6));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .origins-map__legend,
+  .origins-map__legend-item[data-active]::after,
+  .stepper__value,
+  img.img-smart[data-state='loaded'],
+  :where(*):has(> img.img-smart[data-state='loading']),
+  .nav-progress[data-state='loading'],
+  .cart-button[data-bump],
+  .cart-button__count,
+  .cart-button__plus,
+  .drawer .cart-line,
+  .pair-suggest,
+  .pair-suggest__card,
+  .pin-field__area,
+  .pin-field__dot,
+  .pin-field[data-status='checking'] .field__hint,
+  .track__live-dot,
+  .btn--primary:hover::after,
+  .chip[data-active='true'],
+  .toast--success .toast__glyph {
+    animation: none;
+  }
+  img.img-smart[data-state='loading'] {
+    opacity: 1;
+  }
+  .nav-progress[data-state='loading'] {
+    transform: scaleX(0.6);
+  }
+  .cart-button__plus {
+    display: none;
+  }
+}

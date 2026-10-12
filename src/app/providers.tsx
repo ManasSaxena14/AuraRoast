@@ -1,11 +1,14 @@
 'use client';
 import dynamic from 'next/dynamic';
+import { Suspense } from 'react';
 import { SessionProvider } from 'next-auth/react';
 import { CartProvider } from '@/components/cart/CartProvider';
 import { ToastProvider, useToastBridge } from '@/components/toast/ToastProvider';
 import { SmoothScroll } from '@/components/motion/SmoothScroll';
 import { ViewTransitions } from '@/components/motion/ViewTransitions';
 import { ScrollSkew } from '@/components/motion/ScrollSkew';
+import { NavProgress } from '@/components/motion/NavProgress';
+import { Spotlight } from '@/components/motion/Spotlight';
 import type { Drink, Modifier } from '@/domain/types';
 
 /* Neither of these renders anything until the guest asks for it, so neither
@@ -50,6 +53,11 @@ export function AppProviders({
     <MaybeSession enabled={authEnabled}>
       <ToastProvider>
         <ToastBridge />
+        {/* Reads the query string, so it needs its own boundary on static pages. */}
+        <Suspense fallback={null}>
+          <NavProgress />
+        </Suspense>
+        <Spotlight />
         <CartProvider catalogue={drinks} modifiers={modifiers}>
           <ViewTransitions>
             <SmoothScroll>{children}</SmoothScroll>

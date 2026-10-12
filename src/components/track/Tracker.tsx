@@ -292,6 +292,10 @@ export function Tracker({
       <div className="track">
         <div className="track__sticky">
           <div className="track__map">
+            <span className="track__live-badge" data-settled={settled || undefined} aria-hidden="true">
+              <span className="track__live-dot" />
+              {status === 'cancelled' ? 'Cancelled' : stage === 'delivered' ? 'Delivered' : 'Live'}
+            </span>
             <MapCanvas
               center={
                 data?.store
@@ -307,8 +311,10 @@ export function Tracker({
             />
           </div>
           <p className="mono muted" style={{ fontSize: 10, marginTop: 'var(--space-3)' }}>
-            Route from {data?.routeSource === 'osrm' ? 'OSRM road data' : 'a synthesized path'} ·
-            fetched once at confirmation and stored · polling every {POLL_MS / 1000}s
+            {data
+              ? `Route from ${data.routeSource === 'osrm' ? 'OSRM road data' : 'a synthesized path'} · fetched once at confirmation and stored · `
+              : 'Loading the route · '}
+            {settled ? 'final position' : `live, updating every ${POLL_MS / 1000}s`}
           </p>
         </div>
 
@@ -412,11 +418,28 @@ export function Tracker({
           ) : null}
 
           {order.fulfillment === 'delivery' && (order.addressLine || data?.destination) ? (
-            <div className="card stack-sm" style={{ background: 'var(--roast-800)', border: 'var(--hairline)', padding: 'var(--space-4)' }}>
-              <p className="eyebrow" style={{ fontSize: 10, letterSpacing: '0.08em' }}>Delivery Destination</p>
+            <div className="card stack-sm track__dest">
+              <p className="eyebrow" style={{ fontSize: 10, letterSpacing: '0.08em' }}>Delivery destination</p>
               <p style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}>
                 {order.addressLine || 'Pinned location on map'}
               </p>
+              {order.deliveryPincode ? (
+                <p className="track__pin mono">
+                  <span aria-hidden="true">⌖</span> PIN {order.deliveryPincode}
+                </p>
+              ) : null}
+              {mounted && etaMs != null && etaMs > 0 && status !== 'cancelled' ? (
+                <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                  Expected around{' '}
+                  <strong style={{ color: 'var(--aura-300)' }}>
+                    {new Date(Date.now() + etaMs).toLocaleTimeString('en-IN', {
+                      timeZone: 'Asia/Kolkata',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </strong>
+                </p>
+              ) : null}
               {order.guestName ? (
                 <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
                   For {order.guestName}

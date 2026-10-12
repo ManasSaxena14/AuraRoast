@@ -38,6 +38,10 @@ export interface MapCanvasProps {
   className?: string;
   onSelect?: (id: string) => void;
   interactive?: boolean;
+  /** Hillshade relief under the labels — for the farms, where the land IS the story. */
+  terrain?: boolean;
+  /** Where the zoom buttons sit. Bottom-right by default — top-left is under the header. */
+  zoomPosition?: 'topleft' | 'topright' | 'bottomleft' | 'bottomright';
   ariaLabel: string;
 }
 
@@ -53,6 +57,8 @@ export default function MapCanvas({
   className,
   onSelect,
   interactive = true,
+  terrain = false,
+  zoomPosition = 'bottomright',
   ariaLabel,
 }: MapCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -81,7 +87,8 @@ export default function MapCanvas({
         center: [center.lat, center.lng],
         zoom,
         preferCanvas: true,
-        zoomControl: interactive,
+        // Added below, bottom-right: top-left sits under the site header.
+        zoomControl: false,
         dragging: interactive,
         scrollWheelZoom: false, // never steal the page scroll
         attributionControl: true,
@@ -100,8 +107,49 @@ export default function MapCanvas({
             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, &copy; Esri, HERE, Garmin',
           maxZoom: 16,
           crossOrigin: true,
+          className: 'tiles-base',
         },
       ).addTo(map);
+
+      // Relief and place names, both from the same keyless Esri services.
+      // Labels live in their own pane ABOVE the relief and route but BELOW
+      // the markers, and never take a click.
+      if (terrain) {
+        L.tileLayer(
+          'https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade_Dark/MapServer/tile/{z}/{y}/{x}',
+          { maxZoom: 16, crossOrigin: true, className: 'tiles-relief' },
+        ).addTo(map);
+      }
+      map.createPane('labels');
+      const labelPane = map.getPane('labels');
+      if (labelPane) {
+        labelPane.style.zIndex = '450';
+        labelPane.style.pointerEvents = 'none';
+      }
+      const labels = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 16, crossOrigin: true, pane: 'labels', className: 'tiles-labels' },
+      ).addTo(map);
+      // Leaflet keeps the previous zoom level's tiles alive, scaled, to
+      // cover the gap while new ones load. Under an opaque basemap that is
+      // invisible; a TRANSPARENT label layer shows them through — "Salem"
+      // eight times its size behind the sharp new labels after a flyTo. Once
+      // the current level has loaded, only it stays visible; every level is
+      // shown again as the next zoom starts, so the gap is still covered.
+      const levelContainers = () =>
+        Array.from(
+          labels.getContainer()?.querySelectorAll<HTMLElement>('.leaflet-tile-container') ?? [],
+        );
+      labels.on('load', () => {
+        const all = levelContainers();
+        const top = Math.max(...all.map((el) => Number(el.style.zIndex) || 0));
+        for (const el of all) el.style.visibility = Number(el.style.zIndex) === top ? '' : 'hidden';
+      });
+      map.on('zoomstart', () => {
+        for (const el of levelContainers()) el.style.visibility = '';
+      });
+
+      if (interactive) L.control.zoom({ position: zoomPosition }).addTo(map);
 
       // A basemap that silently fails is how the CARTO regression survived. If
       // enough tiles error the map says so instead of showing an empty grid.
@@ -171,8 +219,8 @@ export default function MapCanvas({
         html: `<span class="map-pin__dot"></span><span class="map-pin__bloom"></span>${
           m.label ? `<span class="map-pin__label">${escapeHtml(m.label)}</span>` : ''
         }`,
-        iconSize: [22, 22],
-        iconAnchor: [11, 11],
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
       });
 
       const marker = L.marker([m.lat, m.lng], {
@@ -277,6 +325,7 @@ export default function MapCanvas({
   return (
     <div className={`map-shell${className ? ` ${className}` : ''}`}>
       <div ref={hostRef} className="map-canvas" />
+      <span className="map-shell__vignette" aria-hidden="true" />
       {tileFailure ? (
         <p className="map-canvas__offline" role="status">
           The basemap is not loading. The pins and routes below are still accurate.

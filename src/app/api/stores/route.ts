@@ -3,7 +3,8 @@ import { cached, fail } from '@/lib/http';
 export const runtime = 'nodejs';
 export async function GET() {
   try {
-    return cached({ stores: await listStores() }, 600);
+    const stores = await listStores();
+    return cached({ stores }, 600);
   } catch (err) {
     return fail(err);
   }

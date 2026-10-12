@@ -83,8 +83,12 @@ export async function getOrigin(slug: string): Promise<Origin | null> {
   return (await listOrigins()).find((o) => o.slug === slug) ?? null;
 }
 
+/**
+ * Active rooms. Bars are not reached by phone, so the number is blanked here,
+ * once, before any page or route can hand it to a browser.
+ */
 export async function listStores(): Promise<Store[]> {
-  return (await catalogueSnapshot()).stores.filter((s) => s.isActive);
+  return (await catalogueSnapshot()).stores.filter((s) => s.isActive).map((s) => ({ ...s, phone: '' }));
 }
 
 /** Any room an order may point at — including one that has since closed. */

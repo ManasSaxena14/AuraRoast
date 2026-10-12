@@ -28,6 +28,7 @@ import {
 } from '@/domain/errors';
 import { hashPayload, uuid } from '@/lib/ids';
 import { fetchRoute } from '@/lib/osrm';
+import { geocode, isPincode, lookupPincode } from '@/lib/nominatim';
 import { haversine, syntheticBezier } from '@/lib/geo';
 import {
   accruePoints,
@@ -52,6 +53,7 @@ export interface PlaceOrderInput {
   guestEmail: string;
   guestPhone?: string | null;
   addressLine?: string | null;
+  deliveryPincode?: string | null;
   deliveryLat?: number | null;
   deliveryLng?: number | null;
   tip?: number;
@@ -106,6 +108,7 @@ const inputSchema = z.object({
   guestEmail: z.string().max(300).default(''),
   guestPhone: z.string().max(100).nullish(),
   addressLine: z.string().max(1000).nullish(),
+  deliveryPincode: z.string().max(12).nullish(),
   deliveryLat: z.number().min(-90).max(90).nullish(),
   deliveryLng: z.number().min(-180).max(180).nullish(),
   tip: z.coerce.number().int().min(0).max(1_000_000).nullish(),
@@ -135,6 +138,7 @@ export async function placeOrder(
   input.guestName = input.guestName.trim();
   input.guestEmail = input.guestEmail.trim();
   input.addressLine = input.addressLine?.trim() || null;
+  input.deliveryPincode = input.deliveryPincode?.replace(/\s/g, '') || null;
 
   if (!input.lines.length) throw new DomainError('Your cart is empty.', 'empty_cart', 400);
   if (!input.guestName) throw new DomainError('A name is required.', 'name_required', 400);
@@ -144,6 +148,10 @@ export async function placeOrder(
   if (input.fulfillment === 'delivery' && !input.addressLine) {
     throw new DomainError('A delivery address is required.', 'address_required', 400);
   }
+  if (input.fulfillment === 'delivery' && !isPincode(input.deliveryPincode)) {
+    throw new DomainError('A six-digit PIN code is required for delivery.', 'pincode_required', 400);
+  }
+  if (input.fulfillment === 'pickup') input.deliveryPincode = null;
 
   // Everything that is PERSISTED onto the order is hashed. Omitting storeId,
   // name, phone, coordinates or userId let a materially different request
@@ -163,6 +171,7 @@ export async function placeOrder(
     email: input.guestEmail,
     phone: input.guestPhone ?? null,
     address: input.addressLine ?? null,
+    pincode: input.deliveryPincode ?? null,
     lat: input.deliveryLat ?? null,
     lng: input.deliveryLng ?? null,
     tip: input.tip ?? 0,
@@ -211,6 +220,20 @@ export async function placeOrder(
     const store = (await getStore(input.storeId)) ?? (await getStore('indiranagar'));
     if (!store) throw new NotFoundError('Store');
 
+    // The courier's route has to end at the guest's door, not at a made-up
+    // point beside the bar. The browser usually sends coordinates; when it
+    // could not (geocoder down, no JavaScript), the server resolves the
+    // address with its PIN, then the PIN alone, before giving up.
+    if (input.fulfillment === 'delivery' && (input.deliveryLat == null || input.deliveryLng == null)) {
+      const hit =
+        (await geocode(`${input.addressLine}, ${input.deliveryPincode}`)) ??
+        (await lookupPincode(input.deliveryPincode ?? ''));
+      if (hit) {
+        input.deliveryLat = hit.lat;
+        input.deliveryLng = hit.lng;
+      }
+    }
+
     const items: OrderItem[] = priced.lines.map((l) => ({
       id: uuid(),
       drinkId: l.drinkId,
@@ -235,6 +258,7 @@ export async function placeOrder(
       storeId: store.id,
       fulfillment: input.fulfillment,
       addressLine: input.addressLine ?? null,
+      deliveryPincode: input.deliveryPincode ?? null,
       deliveryLat: input.deliveryLat ?? null,
       deliveryLng: input.deliveryLng ?? null,
       subtotal: priced.subtotal,
@@ -396,7 +420,20 @@ export async function cancelOrder(orderNumber: string): Promise<Order> {
     { status: 'cancelled', cancelledAt: new Date().toISOString() },
     { status: [...OPEN_STATUSES] },
   );
-  if (updated) return updated;
+  if (updated) {
+    // Points were granted at confirmation (cash at placement, UPI at
+    // verification). A cancelled order gives them back — through the same
+    // append-only ledger, so the history shows both lines.
+    if (updated.userId && effective !== 'pending_payment') {
+      await accruePoints(
+        updated.userId,
+        -pointsForOrder(updated.total),
+        `Cancelled ${orderNumber}`,
+        updated.id,
+      ).catch((err) => console.warn('points_reversal_failed', err));
+    }
+    return updated;
+  }
   const now = await getOrder(orderNumber);
   if (now.status === 'cancelled') return now;
   throw new DomainError('That order changed while cancelling — reload and try again.', 'conflict', 409);

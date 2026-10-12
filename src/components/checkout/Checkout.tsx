@@ -9,7 +9,7 @@
  */
 import { useRouter } from 'next/navigation';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import Image from 'next/image';
+import Image from '@/components/ui/SmartImage';
 import { SessionContext } from 'next-auth/react';
 import { rememberOrder } from '@/lib/device-orders';
 import { formatMoney } from '@/domain/money';
@@ -62,6 +62,16 @@ function idempotencyKey(signature: string): string {
   return key;
 }
 
+const PINCODE_RE = /^[1-9][0-9]{5}$/;
+
+interface PinInfo {
+  pincode: string;
+  lat: number;
+  lng: number;
+  area: string;
+  city: string;
+}
+
 function findNearestStore(stores: Store[], lat: number, lng: number): Store | null {
   let best: Store | null = null;
   let bestDist = Infinity;
@@ -85,6 +95,10 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
+  const [pincode, setPincode] = useState('');
+  const [pin, setPin] = useState<PinInfo | null>(null);
+  const [pinStatus, setPinStatus] = useState<'idle' | 'checking' | 'found' | 'unknown'>('idle');
+  const [pinTouched, setPinTouched] = useState(false);
   const [promoInput, setPromoInput] = useState(promoCode ?? '');
   const [server, setServer] = useState<PricedCart | null>(null);
   const [busy, setBusy] = useState(false);
@@ -178,6 +192,49 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
     return () => { cancelled = true; };
   }, [stores]);
 
+  /* PIN → area, debounced. A recognised PIN names the neighbourhood back to
+     the guest (so a typo is obvious before it becomes a lost courier) and
+     moves the order to the nearest bar. */
+  useEffect(() => {
+    if (!PINCODE_RE.test(pincode)) {
+      setPin(null);
+      setPinStatus('idle');
+      return;
+    }
+    let cancelled = false;
+    setPinStatus('checking');
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/geocode?mode=pincode&q=${pincode}`);
+        const data = (await res.json()) as { result?: PinInfo | null };
+        if (cancelled) return;
+        if (!data.result) {
+          setPin(null);
+          setPinStatus('unknown');
+          return;
+        }
+        setPin(data.result);
+        setPinStatus('found');
+        const nearest = findNearestStore(stores, data.result.lat, data.result.lng);
+        if (nearest) {
+          setStoreId(nearest.id);
+          setNearestLabel(`Nearest to ${pincode}: ${nearest.name}`);
+        }
+      } catch {
+        if (!cancelled) setPinStatus('unknown');
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [pincode, stores]);
+
+  const pinError =
+    fulfillment === 'delivery' && pinTouched && pincode && !PINCODE_RE.test(pincode)
+      ? 'A PIN code is six digits, e.g. 560038.'
+      : null;
+
   const totals = server ?? priced;
   const store = useMemo(() => stores.find((s) => s.id === storeId), [stores, storeId]);
   const cityGroups = useMemo(() => storesByCity(stores), [stores]);
@@ -190,6 +247,11 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
   const place = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
+      if (fulfillment === 'delivery' && !PINCODE_RE.test(pincode)) {
+        setPinTouched(true);
+        setError('Add the six-digit PIN code for the delivery address.');
+        return;
+      }
       setBusy(true);
       setError(null);
       setPlaced(null);
@@ -211,9 +273,9 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
         let deliveryLng: number | undefined;
         if (fulfillment === 'delivery' && address.trim()) {
           try {
-            // Scope the lookup to the chosen bar's city — "12 Church St" is a
-            // real address in four of the six cities we now serve.
-            const scoped = `${address}, ${store?.city ?? 'India'}`;
+            // Scoped by PIN and city — "12 Church St" is a real address in
+            // four of the six cities we serve; the PIN says which one.
+            const scoped = `${address}, ${pincode}, ${pin?.city || store?.city || 'India'}`;
             const g = await fetch(`/api/geocode?q=${encodeURIComponent(scoped)}`);
             const gd = await g.json();
             if (gd.result) {
@@ -224,11 +286,13 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
             /* geocoding is a nicety; the order is not blocked on it */
           }
         }
-        if (deliveryLat === undefined && store) {
-          // A plausible nearby drop so tracking still has a real route.
-          deliveryLat = store.lat + 0.03;
-          deliveryLng = store.lng + 0.025;
+        if (deliveryLat === undefined && fulfillment === 'delivery' && pin) {
+          // The street did not geocode; the PIN's centre is still the right
+          // neighbourhood, which is what the live map needs.
+          deliveryLat = pin.lat;
+          deliveryLng = pin.lng;
         }
+        // Still nothing: the server geocodes the address + PIN itself.
 
         setStage('writing');
         // Built once: the same object decides the idempotency key and is the
@@ -244,6 +308,7 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
           guestEmail: email,
           guestPhone: phone,
           addressLine: fulfillment === 'delivery' ? address : null,
+          deliveryPincode: fulfillment === 'delivery' ? pincode : null,
           deliveryLat,
           deliveryLng,
           tip,
@@ -258,6 +323,11 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
         });
         const data = await res.json();
 
+        if (res.status === 401) {
+          // The session expired mid-checkout: sign back in, come straight back.
+          window.location.href = '/login?callbackUrl=%2Fcheckout';
+          return;
+        }
         if (!res.ok) {
           setStage('failed');
           setError(data.error ?? 'That did not go through.');
@@ -297,7 +367,7 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
         setBusy(false);
       }
     },
-    [address, clear, email, fulfillment, lines, method, name, phone, promoCode, router, store, storeId, tip, totals.total],
+    [address, clear, email, fulfillment, lines, method, name, phone, pin, pincode, promoCode, router, store, storeId, tip, totals.total],
   );
 
   if (hydrated && lines.length === 0) {
@@ -383,13 +453,47 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
             <Field label="Phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel" />
 
             {fulfillment === 'delivery' ? (
-              <TextareaField
-                label="Address"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                required
-                hint="We geocode this once, then route it on real roads"
-              />
+              <>
+                <TextareaField
+                  label="Address"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  required
+                  autoComplete="street-address"
+                  hint="House, street and landmark — we route it on real roads"
+                />
+                <div className="pin-field" data-status={pinStatus}>
+                  <Field
+                    label="PIN code"
+                    value={pincode}
+                    onChange={(e) => setPincode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    onBlur={() => setPinTouched(true)}
+                    required
+                    inputMode="numeric"
+                    autoComplete="postal-code"
+                    pattern="[1-9][0-9]{5}"
+                    maxLength={6}
+                    placeholder="560038"
+                    error={pinError}
+                    hint={
+                      pinStatus === 'checking'
+                        ? 'Finding your area…'
+                        : pinStatus === 'unknown'
+                          ? 'We could not place this PIN — double-check it. The order still goes through.'
+                          : 'Lets us pin the drop on the live map'
+                    }
+                  />
+                  {pin && pinStatus === 'found' ? (
+                    <p className="pin-field__area" aria-live="polite">
+                      <span className="pin-field__dot" aria-hidden="true" />
+                      <span>
+                        Delivering to <strong>{pin.area || pin.city}</strong>
+                        {pin.city && pin.area && pin.city !== pin.area ? `, ${pin.city}` : ''}
+                      </span>
+                    </p>
+                  ) : null}
+                </div>
+              </>
             ) : (
               <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>
                 Collect from {store?.name} — {store?.address}
@@ -434,7 +538,7 @@ export function Checkout({ stores, payment }: { stores: Store[]; payment: Paymen
               return (
                 <div key={l.lineId} className="cart-line">
                   <div className="cart-line__media">
-                    <Image src={l.imageUrl} alt="" width={120} height={120} />
+                    <Image src={l.imageUrl} alt="" width={120} height={120} sizes="68px" />
                   </div>
                   <div className="cart-line__body">
                     <div className="row-between">

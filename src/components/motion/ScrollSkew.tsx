@@ -73,7 +73,6 @@ export function ScrollSkew() {
         io.unobserve(el);
         onScreen.delete(el);
         el.style.removeProperty('transform');
-        el.style.removeProperty('will-change');
       };
 
       // Sections that mount after this runs — a client-rendered grid, a
@@ -90,10 +89,14 @@ export function ScrollSkew() {
         for (const el of now) {
           if (all.has(el)) continue;
           all.add(el);
-          el.style.willChange = 'transform';
           io.observe(el);
         }
       };
+      // The compositor hint lives in CSS behind a flag on <html>, NOT as an
+      // inline style on each section: a section inside a Suspense boundary
+      // hydrates after this runs, and React reported the inline style it had
+      // never rendered as a hydration mismatch.
+      document.documentElement.dataset.skewLayers = 'on';
       collect();
       ScrollTrigger.addEventListener('refresh', collect);
 
@@ -131,6 +134,7 @@ export function ScrollSkew() {
         st.kill();
         for (const el of all) release(el);
         io.disconnect();
+        delete document.documentElement.dataset.skewLayers;
       };
     }
 
