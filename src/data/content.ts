@@ -1,9 +1,9 @@
 /** Editorial blocks keyed by section — the CMS layer, seeded (Blueprint §2.1). */
 export const BRAND = {
-  name: 'AURA TOAST',
+  name: 'AURA ROAST',
   tagline: 'Atmospheric Craft, Pure Origin',
   positioning:
-    'Coffee is two things at once: a material fact and a felt atmosphere. A bean has an origin, an altitude, a farmer, a roast curve — all measurable, all true. And then there is what happens in the room when it lands in front of you, which is none of those things. AURA TOAST is built at that seam.',
+    'Coffee is two things at once: a material fact and a felt atmosphere. A bean has an origin, an altitude, a farmer, a roast curve — all measurable, all true. And then there is what happens in the room when it lands in front of you, which is none of those things. AURA ROAST is built at that seam.',
 } as const;
 
 export const HERO = {

@@ -16,7 +16,7 @@ export function buildUpiUri(o: UpiPayload): string {
     pn: o.payeeName, // payee name
     am: (o.amountPaise / 100).toFixed(2), // amount, rupees
     cu: 'INR',
-    tn: `Aura Toast ${o.orderNumber}`, // transaction note
+    tn: `Aura Roast ${o.orderNumber}`, // transaction note
     tr: o.orderNumber, // reference
   });
   return `upi://pay?${params.toString()}`;

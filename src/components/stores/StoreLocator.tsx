@@ -204,7 +204,7 @@ export function StoreLocator({ stores }: { stores: Store[] }) {
             if (s) setCity(s.city);
             setActive(id);
           }}
-          ariaLabel="Map of Aura Toast bars across India"
+          ariaLabel="Map of Aura Roast bars across India"
         />
         <div className="stores-map__stat mono">
           <CountUp value={stores.length} duration={0.9} /> rooms ·{' '}

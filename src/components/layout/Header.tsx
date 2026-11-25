@@ -85,7 +85,7 @@ export function Header() {
         </div>
       )}
       <div className="header__inner">
-        <Link href="/" className="header__brand" aria-label="AURA TOAST — home">
+        <Link href="/" className="header__brand" aria-label="AURA ROAST — home">
           <Logo size={30} tagline />
         </Link>
 

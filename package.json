@@ -1,8 +1,8 @@
 {
-  "name": "aura-toast",
+  "name": "aura-roast",
   "version": "2.0.0",
   "private": true,
-  "description": "AURA TOAST — Atmospheric Craft, Pure Origin",
+  "description": "AURA ROAST — Atmospheric Craft, Pure Origin",
   "engines": {
     "node": "22.x"
   },

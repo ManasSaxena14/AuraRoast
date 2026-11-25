@@ -24,7 +24,7 @@ import { Magnetic } from '@/components/motion/Magnetic';
 
 export const metadata: Metadata = {
   title: 'Our story',
-  description: 'The people, the rooms and the roast behind AURA TOAST.',
+  description: 'The people, the rooms and the roast behind AURA ROAST.',
 };
 
 /** The two roast answers from the shared FAQ — asked here, answered once. */

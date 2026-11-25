@@ -29,7 +29,7 @@ const schema = z.object({
 
   // Merchant details are configuration, not secrets (§8.2)
   UPI_ID: z.string().default('auratoast@upi'),
-  UPI_PAYEE_NAME: z.string().default('Aura Toast Coffee'),
+  UPI_PAYEE_NAME: z.string().default('Aura Roast Coffee'),
 
   CRON_SECRET: z.string().optional(),
   /* Gates the one route that can confirm a UPI order. Unset DENIES (§5.4). */

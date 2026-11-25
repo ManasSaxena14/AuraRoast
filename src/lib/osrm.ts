@@ -24,7 +24,7 @@ export async function fetchRoute(from: LatLng, to: LatLng): Promise<RouteResult>
 
     const res = await fetch(url, {
       signal: AbortSignal.timeout(4000),
-      headers: { 'User-Agent': 'aura-toast/2.0 (portfolio project)' },
+      headers: { 'User-Agent': 'aura-roast/2.0 (portfolio project)' },
     });
     if (!res.ok) throw new Error(`OSRM ${res.status}`);
 

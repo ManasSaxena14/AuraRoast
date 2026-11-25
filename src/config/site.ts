@@ -1,5 +1,5 @@
 export const SITE = {
-  name: 'AURA TOAST',
+  name: 'AURA ROAST',
   tagline: 'Atmospheric Craft, Pure Origin',
   description:
     'Single-origin coffee from five named farms in southern India. Order, track, and read where it grew.',

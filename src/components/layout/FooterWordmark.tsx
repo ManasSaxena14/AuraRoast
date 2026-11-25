@@ -1,6 +1,6 @@
 'use client';
 /**
- * The sign-off: AURA TOAST set huge across the bottom of every page.
+ * The sign-off: AURA ROAST set huge across the bottom of every page.
  *
  * Each letter rises out of the baseline as the footer scrolls into view —
  * scrubbed, so it tracks the scroll exactly — and a band of light crosses the
@@ -10,7 +10,7 @@
 import { useRef } from 'react';
 import { ScrollTrigger, gsap, useGSAP } from '@/components/motion/gsap';
 
-const WORD = 'AURA TOAST';
+const WORD = 'AURA ROAST';
 
 export function FooterWordmark() {
   const ref = useRef<HTMLDivElement>(null);

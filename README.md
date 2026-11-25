@@ -1,13 +1,13 @@
 <div align="center">
 
-<img src="public/img/og.webp" alt="AURA TOAST — Atmospheric Craft, Pure Origin" width="100%" />
+<img src="public/img/og.webp" alt="AURA ROAST — Atmospheric Craft, Pure Origin" width="100%" />
 
 <br />
 <br />
 
-<img src="public/logo-mark.svg" alt="AURA TOAST logo" width="64" />
+<img src="public/logo-mark.svg" alt="AURA ROAST logo" width="64" />
 
-# AURA TOAST
+# AURA ROAST
 
 ### Atmospheric Craft · Pure Origin
 
@@ -377,7 +377,7 @@ public/hero/          Hero animation frames (144 desktop, 72 mobile)
 
 <img src="public/logo-mark.svg" alt="" width="36" />
 
-**AURA TOAST** — *Atmospheric Craft, Pure Origin.*
+**AURA ROAST** — *Atmospheric Craft, Pure Origin.*
 
 Built by **[Manas Saxena](https://github.com/ManasSaxena14)** · [aura-roast-cafe.vercel.app](https://aura-roast-cafe.vercel.app) · MIT License
 

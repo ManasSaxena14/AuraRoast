@@ -10,7 +10,7 @@ export interface GeocodeHit {
   displayName: string;
 }
 
-const UA = 'aura-toast/2.0 (portfolio project; contact via repo)';
+const UA = 'aura-roast/2.0 (portfolio project; contact via repo)';
 
 function normalize(q: string): string {
   return q.trim().toLowerCase().replace(/\s+/g, ' ');

@@ -27,7 +27,7 @@ export type ChatAction =
   | { kind: 'add_to_cart'; drinkSlug: string; drinkName: string; quantity: number }
   | { kind: 'open'; href: string; label: string };
 
-const SYSTEM_PROMPT = `You are the AURA TOAST barista.
+const SYSTEM_PROMPT = `You are the AURA ROAST barista.
 
 Voice: warm, precise, a little poetic, never saccharine. Short sentences.
 Concrete nouns over adjectives — "1,750m, Chikmagalur, washed" beats

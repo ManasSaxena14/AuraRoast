@@ -102,7 +102,7 @@ export function Footer() {
 
       <div className="shell">
         <div className="footer__bottom">
-          <p className="mono">© {year} Aura Toast Coffee · Atmospheric craft, pure origin</p>
+          <p className="mono">© {year} Aura Roast Coffee · Atmospheric craft, pure origin</p>
           <ul className="footer__legal">
             <li>
               <span className="footer__pay">Cash · UPI · No card data stored</span>

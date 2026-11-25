@@ -71,7 +71,7 @@ export function Hero() {
               style={{ transformOrigin: '72px 32px' }}
             />
           </svg>
-          <p className="brand-gate__wordmark">AURA TOAST</p>
+          <p className="brand-gate__wordmark">AURA ROAST</p>
         </div>
       </div>
 

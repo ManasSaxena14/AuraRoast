@@ -1,4 +1,4 @@
-# Deploying AURA TOAST
+# Deploying AURA ROAST
 
 Live: **https://aura-roast-cafe.vercel.app**
 
@@ -23,7 +23,7 @@ Set these in **Vercel → Project → Settings → Environment Variables** (tick
 | `ADMIN_EMAILS` | **Yes** | Comma-separated Google emails allowed into `/admin` and to verify UPI payments. **Unset = `/admin` locked for everyone.** | `you@gmail.com,manager@gmail.com` |
 | `NEXT_PUBLIC_SITE_URL` | **Yes** | Public URL, used for social-card links. Baked in at build time. | `https://aura-roast-cafe.vercel.app` |
 | `UPI_ID` | Recommended | The UPI ID customers pay to (shown on the QR). | `yourshop@okbank` |
-| `UPI_PAYEE_NAME` | Recommended | Name shown in the UPI app. | `Aura Toast Coffee` |
+| `UPI_PAYEE_NAME` | Recommended | Name shown in the UPI app. | `Aura Roast Coffee` |
 | `GROQ_API_KEY` | Optional | Enables the LLM Barista. Without it a local responder answers, tools still work. | Groq console |
 | `GROQ_MODEL` | Optional | Defaults to `openai/gpt-oss-120b`. If the configured model is retired by Groq, the next available one is used automatically. | |
 | `ADMIN_SECRET` | Optional | Lets scripts verify payments with `Authorization: Bearer …`. | long random string |

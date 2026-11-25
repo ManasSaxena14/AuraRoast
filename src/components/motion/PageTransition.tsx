@@ -59,7 +59,7 @@ export function PageTransition({ children }: { children: React.ReactNode }) {
     //    different pages that share the title "Drink detail" — would otherwise
     //    be announced exactly once, on the first of them.
     setAnnouncement('');
-    const speak = setTimeout(() => setAnnouncement(`${titleFor(pathname)} — AURA TOAST`), 80);
+    const speak = setTimeout(() => setAnnouncement(`${titleFor(pathname)} — AURA ROAST`), 80);
     return () => clearTimeout(speak);
   }, [pathname]);
 

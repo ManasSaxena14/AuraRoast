@@ -1,5 +1,5 @@
 /**
- * AURA TOAST — the mark.
+ * AURA ROAST — the mark.
  *
  * The brand's signature element is the Halo (§1.3): a thin amber arc with a
  * soft outer bloom. The logo is that Halo, opened at twelve o'clock, with a
@@ -44,7 +44,7 @@ export function LogoMark({
   size = 40,
   flat = false,
   animate = false,
-  title = 'Aura Toast',
+  title = 'Aura Roast',
   className,
 }: LogoProps) {
   const small = size <= 24;
@@ -122,7 +122,7 @@ export function Logo({
     <span className={`logo logo--${layout}${className ? ` ${className}` : ''}`}>
       <LogoMark size={size} animate={animate} />
       <span className="logo__type">
-        <span className="logo__word">AURA TOAST</span>
+        <span className="logo__word">AURA ROAST</span>
         {tagline ? <span className="logo__tag">Atmospheric Craft, Pure Origin</span> : null}
       </span>
     </span>
